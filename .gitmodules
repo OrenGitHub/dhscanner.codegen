@@ -1,0 +1,3 @@
+[submodule "dhscanner.ast"]
+	path = dhscanner.ast
+	url = https://github.com/OrenGitHub/dhscanner.ast
