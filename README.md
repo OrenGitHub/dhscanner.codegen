@@ -6,8 +6,8 @@ See also [OrenGitHub/dhscanner.ast][1]
 ## run on docker
 
 ```bash
-docker build --tag host.parser --file Dockerfile .
-docker run -p 8001:3000 -d -t --name parser host
+docker build --tag host.typer --file Dockerfile .
+docker run -p 8002:3000 -d -t --name typer host
 ```
 
 ## run

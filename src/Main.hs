@@ -27,7 +27,7 @@ instance Yesod App
 postHomeR :: Handler Value
 postHomeR = do
     asts <- requireCheckJsonBody :: Handler Asts
-    returnJson (encodeToLazyText asts)
+    returnJson asts
 
 main :: IO ()
 main = warp 3000 App
