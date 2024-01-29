@@ -9,12 +9,10 @@
 import Yesod
 import Prelude
 import Data.Aeson()
-import GHC.Generics
-import Data.Text.Lazy
-import Data.Aeson.Text (encodeToLazyText)
 
 -- project imports
-import Ast ( Asts )
+import Asts
+import CodeGen ( codeGen )
 
 data App = App
 
@@ -27,7 +25,7 @@ instance Yesod App
 postHomeR :: Handler Value
 postHomeR = do
     asts <- requireCheckJsonBody :: Handler Asts
-    returnJson asts
+    returnJson $ codeGen asts
 
 main :: IO ()
 main = warp 3000 App

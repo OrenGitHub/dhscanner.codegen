@@ -41,9 +41,10 @@ executable codegen
     main-is: Main.hs
 
     other-modules:
-        Ast,
         Cfg,
         Fqn,
+        Ast,
+        Asts,
         Token,
         Bitcode,
         Location,
