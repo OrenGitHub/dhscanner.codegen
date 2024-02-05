@@ -1,4 +1,4 @@
-# dhscanner.typer
+# dhscanner.codegen
 
 An [AST][1]-based type resolver
 See also [OrenGitHub/dhscanner.ast][1]
@@ -6,8 +6,8 @@ See also [OrenGitHub/dhscanner.ast][1]
 ## run on docker
 
 ```bash
-docker build --tag host.typer --file Dockerfile .
-docker run -p 8002:3000 -d -t --name typer host
+docker build --tag host.codegen --file Dockerfile .
+docker run -p 8002:3000 -d -t --name codegen host.codegen
 ```
 
 ## run
