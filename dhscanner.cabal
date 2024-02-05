@@ -47,6 +47,7 @@ executable codegen
         Asts,
         Token,
         Bitcode,
+        CodeGen,
         Location,
         Callable
 
