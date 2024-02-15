@@ -85,7 +85,7 @@ codeGenDecVarNoInit' decVar ctx = let
 -- * return an empty cfg (nop) since nothing happens (no init)
 codeGenDecVarNoInit :: Ast.DecVarContent -> CodeGenContext Cfg
 codeGenDecVarNoInit decVar = do {
-    ctx <- get; put (codeGenDecVarNoInit' decVar ctx)
+    ctx <- get; put (codeGenDecVarNoInit' decVar ctx);
     return $ Cfg.empty (Token.getVarNameLocation (Ast.decVarName decVar))
 }
 
@@ -96,8 +96,8 @@ codeGenDecVarInitialized' varName actualType ctx = let
     in CodeGenState { symbolTable = symbolTable' }
 
 -- | Non monadic helper function
-codeGenDecVarInitialized'' :: Token.VarName -> (Bitcode.TmpVariable, Cfg) -> Cfg
-codeGenDecVarInitialized'' varName (tmpVariable, cfg) = let
+codeGenDecVarInitialized'' :: Token.VarName -> (Cfg, Bitcode.TmpVariable) -> Cfg
+codeGenDecVarInitialized'' varName (cfg, tmpVariable) = let
     srcVariable = Bitcode.SrcVariableCtor $ Bitcode.SrcVariable varName
     assignContent = Bitcode.AssignContent { assignOutput = srcVariable, assignInput = tmpVariable }
     assign = Bitcode.Assign assignContent
@@ -115,8 +115,10 @@ codeGenDecVarInitialized'' varName (tmpVariable, cfg) = let
 -- * return the resulted cfg
 codeGenDecVarInitialized :: Token.VarName -> Token.NominalTy -> Ast.Exp -> CodeGenContext Cfg
 codeGenDecVarInitialized varName nominalType initValue = do {
-    ctx <- get; put (codeGenDecVarInitialized' varName (actualType (fst (codeGenExp initValue))) ctx)
-    return $ codeGenDecVarInitialized'' varName (codeGenExp initValue)
+    (cfg, tmpVariable) <- codeGenExp initValue;
+    ctx <- get;
+    put (codeGenDecVarInitialized' varName (Bitcode.actualType tmpVariable) ctx);
+    return $ codeGenDecVarInitialized'' varName (cfg, tmpVariable)
 }
 
 codeGenDecFunc :: Ast.DecFuncContent -> CodeGenContext Cfg
