@@ -29,6 +29,7 @@ import qualified Bitcode
 import qualified SymbolTable
 
 -- general imports
+import Data.List
 import Control.Monad.State.Lazy
 import Control.Monad ( foldM )
 
@@ -125,7 +126,10 @@ codeGenDecFunc :: Ast.DecFuncContent -> CodeGenContext Cfg
 codeGenDecFunc decFunc = codeGenStmts (Ast.decFuncBody decFunc) (Ast.decFuncLocation decFunc)
 
 codeGenStmts :: [ Ast.Stmt ] -> Location -> CodeGenContext Cfg 
-codeGenStmts stmts location = foldM (Cfg.empty location) `Cfg.concat` (mapM codeGenStmt stmts)
+codeGenStmts stmts location = do {
+    cfgs <- mapM codeGenStmt stmts;
+    return $ head cfgs
+}
 
 codeGenStmt :: Ast.Stmt -> CodeGenContext Cfg
 codeGenStmt (Ast.StmtWhile stmtWhile) = codeGenStmtWhile stmtWhile
