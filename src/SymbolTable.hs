@@ -13,28 +13,29 @@ import Data.Map ( Map )
 -- general (qualified) imports
 import qualified Data.Map
 
-data SymbolTable
-   = SymbolTable
-     {
-         scopes :: [ Scope ]
-     }
-     deriving ( Show, Eq )
+-- |
+-- * A stack-like data structure to manage scopes while traversing the AST
+--
+-- * Note that the scopes stack is /never/ empty
+--
+-- * the scopes start from the current (innermost) scope
+--
+data SymbolTable = SymbolTable { scopes :: [ Scope ] } deriving ( Show )
 
-data Scope
-   = Scope
-     {
-         actualScope :: Map String ActualType
-     }
-     deriving ( Show, Eq )
+-- | Unexposed wrapper around Data.Map
+data Scope = Scope { actualScope :: Map String ActualType } deriving ( Show )
 
+-- | Unexposed, internal use only
 newEmptyScope :: Scope
 newEmptyScope = Scope { actualScope = Data.Map.empty }
 
+-- | It is ther user's responsibility that `beginScope` is coupled with its `endScope`
 beginScope :: SymbolTable -> SymbolTable
 beginScope table = SymbolTable { scopes = newEmptyScope:(scopes table) }
 
+-- | It is ther user's responsibility that `beginScope` is coupled with its `endScope`
 endScope :: SymbolTable -> SymbolTable
-endScope table = SymbolTable { scopes = tail $ scopes table }
+endScope = SymbolTable . tail . scopes
 
 emptySymbolTable = SymbolTable { scopes = [] }
 
