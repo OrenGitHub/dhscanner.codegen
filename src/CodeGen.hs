@@ -43,16 +43,16 @@ type CodeGenContext = State CodeGenState
 
 initCodeGenState = CodeGenState emptySymbolTable
 
-codeGen :: Asts -> Callables
-codeGen asts = Callables $ evalState (codeGenRoots (astsContent asts)) initCodeGenState
+codeGen :: Asts -> [[ Cfg ]]
+codeGen asts = evalState (codeGenRoots (astsContent asts)) initCodeGenState
 
-codeGenRoots :: [ Ast.Root ] -> CodeGenContext [ Cfg ]
+codeGenRoots :: [ Ast.Root ] -> CodeGenContext [[ Cfg ]]
 codeGenRoots = mapM codeGenRoot 
 
-codeGenRoot :: Ast.Root -> CodeGenContext Cfg
+codeGenRoot :: Ast.Root -> CodeGenContext [ Cfg ]
 codeGenRoot = codeGenDecs . Ast.actualAst
 
-codeGenDecs :: [ Ast.Dec ] -> CodeGenContext Cfg
+codeGenDecs :: [ Ast.Dec ] -> CodeGenContext [ Cfg ]
 codeGenDecs = mapM codeGenDec 
 
 codeGenDec :: Ast.Dec -> CodeGenContext Cfg
@@ -65,10 +65,10 @@ codeGenDec (Ast.DecImport decImport) = undefined
 codeGenDecVar :: Ast.DecVarContent -> CodeGenContext Cfg
 codeGenDecVar decVar = case Ast.decVarInitValue decVar of
     Nothing -> codeGenDecVarNoInit decVar
-    Just _ -> codeGenDecVarInitialized decVar
-
-lookupNominalType :: Token.NominalTy -> SymbolTable -> Maybe ActualType
-lookupNominalType = SymbolTable.lookup . Token.getNominalTyToken
+    Just initValue -> let
+        varName = Ast.decVarName decVar
+        nominalType = Ast.decVarNominalType decVar
+        in codeGenDecVarInitialized varName nominalType initValue
 
 -- | update the symbol table with the declared variable
 codeGenDecVarNoInit' :: Ast.DecVarContent -> CodeGenState -> CodeGenState
@@ -103,7 +103,7 @@ codeGenDecVarInitialized'' varName (tmpVariable, cfg) = let
     assign = Bitcode.Assign assignContent
     location' = Token.getVarNameLocation varName
     instruction = Bitcode.Instruction { Bitcode.location = location', instructionContent = assign }
-    in cfg `Cfg.concat` Cfg.atom $ Node instruction
+    in cfg `Cfg.concat` (Cfg.atom (Node instruction))
 
 -- |
 -- * update the symbol table with the declared variable
@@ -138,8 +138,9 @@ codeGenStmtWhile stmtWhile = Cfg.loopify cond body guard location
         location = Ast.stmtWhileLocation stmtWhile
 
 codeGenStmtReturn :: Ast.StmtReturnContent -> CodeGenContext Cfg
-codeGenStmtReturn stmtReturn = Cfg.atom (Cfg.Node returnInstruction)
-    where returnInstruction = Bitcode.Return 
+codeGenStmtReturn stmtReturn = case Ast.stmtReturnValue stmtReturn of
+    Nothing -> Cfg.atom (Cfg.Node (Bitcode.Instruction (Ast.stmtReturnLocation stmtReturn) Bitcode.Return))
+    Just returnValue -> let (_, cfg) = codeGenExp returnValue in cfg
 
 codeGenExp :: Ast.Exp -> CodeGenContext (Cfg, Bitcode.TmpVariable)
 codeGenExp (Ast.ExpInt   expInt  ) = codeGenExpInt   expInt
@@ -160,14 +161,3 @@ codeGenExpInt expIntContent = return $ let
     loadImm = Bitcode.LoadImm loadImmInt
     in (Cfg.atom (Node (Bitcode.Instruction location loadImm)), tmpVariable)
 
-mkNopInstruction :: Location -> Node
-mkNopInstruction l = Node { theInstructionInside = Bitcode.mkNopInstruction l }
-
-cfgDecVar :: Ast.DecVarContent -> Cfg
-cfgDecVar d = Cfg { entry = entry', exit = exit', Cfg.location = location', edges = edges' }
-    where
-        location' = Token.getVarNameLocation $ Ast.decVarName d
-        entry' = mkNopInstruction location'
-        exit'  = mkNopInstruction location'
-        edges' = Edges { actualEdges = fromList [ Edge { from = entry', to = exit' } ] }
- 
