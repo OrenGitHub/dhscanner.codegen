@@ -122,27 +122,47 @@ codeGenDecVarInitialized varName nominalType initValue = do {
 }
 
 codeGenDecFunc :: Ast.DecFuncContent -> CodeGenContext Cfg
-codeGenDecFunc decFunc = codeGenStmts (Ast.decFuncBody decFunc)
+codeGenDecFunc decFunc = codeGenStmts (Ast.decFuncBody decFunc) (Ast.decFuncLocation decFunc)
 
-codeGenStmts :: [ Ast.Stmt ] -> CodeGenContext Cfg
-codeGenStmts stmts = foldM Cfg.empty `Cfg.concat` (mapM codeGenStmt stmts)
+codeGenStmts :: [ Ast.Stmt ] -> Location -> CodeGenContext Cfg 
+codeGenStmts stmts location = foldM (Cfg.empty location) `Cfg.concat` (mapM codeGenStmt stmts)
 
 codeGenStmt :: Ast.Stmt -> CodeGenContext Cfg
 codeGenStmt (Ast.StmtWhile stmtWhile) = codeGenStmtWhile stmtWhile
 
 
 codeGenStmtWhile :: Ast.StmtWhileContent -> CodeGenContext Cfg
-codeGenStmtWhile stmtWhile = Cfg.loopify cond body guard location
-    where
-        cond = codeGenExp (Ast.stmtWhileCond stmtWhile)
-        body = codeGenStmts (Ast.stmtWhileBody stmtWhile)
-        guard = codeGenExp (Ast.stmtWhileCond stmtWhile)
-        location = Ast.stmtWhileLocation stmtWhile
+codeGenStmtWhile stmtWhile = do {
+    (cfgCond, tmpVariableCond) <- codeGenExp (Ast.stmtWhileCond stmtWhile);
+    cfgBody <- codeGenStmts (Ast.stmtWhileBody stmtWhile) (Ast.stmtWhileLocation stmtWhile);
+    return $ Cfg.loopify cfgCond cfgBody tmpVariableCond
+}
+
+-- | Non monadic helper function
+codeGenStmtReturnValue' :: Ast.Exp -> Cfg -> Bitcode.TmpVariable -> Cfg
+codeGenStmtReturnValue' value cfg tmpVariable = let
+    location = Bitcode.tmpVariableLocation tmpVariable
+    bitcodeReturn = Bitcode.Return $ Bitcode.ReturnContent (Just tmpVariable)
+    instruction = Bitcode.Instruction location bitcodeReturn
+    in cfg `Cfg.concat` (Cfg.atom (Node instruction))
+
+codeGenStmtReturnValue :: Ast.Exp -> CodeGenContext Cfg
+codeGenStmtReturnValue value = do {
+    (cfg, tmpVariable) <- codeGenExp value;
+    return $ codeGenStmtReturnValue' value cfg tmpVariable
+}
+
+codeGenStmtReturnNoValue :: Ast.StmtReturnContent -> CodeGenContext Cfg
+codeGenStmtReturnNoValue returnStmt = return $ let
+    location = Ast.stmtReturnLocation returnStmt
+    bitcodeReturn = Bitcode.Return $ Bitcode.ReturnContent Nothing
+    instruction = Bitcode.Instruction location bitcodeReturn
+    in Cfg.atom (Node instruction)
 
 codeGenStmtReturn :: Ast.StmtReturnContent -> CodeGenContext Cfg
 codeGenStmtReturn stmtReturn = case Ast.stmtReturnValue stmtReturn of
-    Nothing -> Cfg.atom (Cfg.Node (Bitcode.Instruction (Ast.stmtReturnLocation stmtReturn) Bitcode.Return))
-    Just returnValue -> let (_, cfg) = codeGenExp returnValue in cfg
+    Nothing -> codeGenStmtReturnNoValue stmtReturn
+    Just value -> codeGenStmtReturnValue value
 
 codeGenExp :: Ast.Exp -> CodeGenContext (Cfg, Bitcode.TmpVariable)
 codeGenExp (Ast.ExpInt   expInt  ) = codeGenExpInt   expInt
