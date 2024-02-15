@@ -31,7 +31,7 @@ newEmptyScope = Scope { actualScope = Data.Map.empty }
 
 -- | It is ther user's responsibility that `beginScope` is coupled with its `endScope`
 beginScope :: SymbolTable -> SymbolTable
-beginScope table = SymbolTable { scopes = newEmptyScope:(scopes table) }
+beginScope = SymbolTable . (newEmptyScope:) . scopes
 
 -- | It is ther user's responsibility that `beginScope` is coupled with its `endScope`
 endScope :: SymbolTable -> SymbolTable
