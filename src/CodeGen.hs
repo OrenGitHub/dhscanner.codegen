@@ -11,7 +11,7 @@ import Cfg
 import Asts
 import Callable
 import Location
-import ActualType
+import ActualType hiding ( returnType )
 import Bitcode (
     assignInput,
     assignOutput,
@@ -26,6 +26,7 @@ import SymbolTable (
 import qualified Ast
 import qualified Token
 import qualified Bitcode
+import qualified ActualType
 import qualified SymbolTable
 
 -- general imports
@@ -140,8 +141,17 @@ codeGenDecVarInitialized varName nominalType initValue = do {
 }
 
 -- | helper non monadic function
-returnType :: decFunc -> CodeGenState -> ActualType
-returnType d ctx = ActualType.returnType (SymbolTable.lookupDecFunc d (symbolTable ctx))
+returnType'' :: ActualType -> ActualType
+returnType'' (ActualType.Function f) = ActualType.returnType f
+returnType'' _ = ActualType.Any
+
+-- | helper non monadic function
+returnType' :: Token.Named -> SymbolTable -> ActualType
+returnType' = returnType'' . SymbolTable.lookup
+
+-- | helper non monadic function
+returnType :: Ast.DecFuncContent -> CodeGenState -> ActualType
+returnType = returnType' (Token.getFuncNameToken . Ast.decFuncName *** symbolTable)
 
 -- | helper non monadic function for return value
 returnedValue :: Ast.DecFuncContent -> CodeGenState -> Bitcode.TmpVariable
@@ -199,7 +209,7 @@ codeGenStmtWhileCond = codeGenExp . Ast.stmtWhileCond
 
 -- | trivial monadic helper functions
 codeGenStmtWhileBody :: Ast.StmtWhileContent -> CodeGenContext Cfg
-codeGenStmtWhileBody = uncarry codeGenStmts (Ast.stmtWhileBody &&& Ast.stmtWhileLocation)
+codeGenStmtWhileBody = uncurry codeGenStmts (Ast.stmtWhileBody &&& Ast.stmtWhileLocation)
 
 -- | code generation for while loops
 codeGenStmtWhile :: Ast.StmtWhileContent -> CodeGenContext Cfg
