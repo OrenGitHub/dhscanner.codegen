@@ -147,27 +147,47 @@ returnType'' _ = ActualType.Any
 
 -- | helper non monadic function
 returnType' :: Token.Named -> SymbolTable -> ActualType
-returnType' = returnType'' . SymbolTable.lookup
+returnType' name symbolTable = returnType'' $ SymbolTable.lookup name symbolTable
 
 -- | helper non monadic function
-returnType :: Ast.DecFuncContent -> CodeGenState -> ActualType
+returnType :: Ast.DecFuncContent -> CodeGenState -> ActualType.ActualType
 returnType = returnType' (Token.getFuncNameToken . Ast.decFuncName *** symbolTable)
 
 -- | helper non monadic function for return value
 returnedValue :: Ast.DecFuncContent -> CodeGenState -> Bitcode.TmpVariable
-returnedValue d ctx = Bitcode.TmpVariable (Ast.locationDec d) (returnType d ctx)
+returnedValue d ctx = Bitcode.TmpVariable (returnType d ctx) (Ast.decFuncLocation d)
+
+-- | helper non monadic function for return value
+ret :: Bitcode.TmpVariable -> Bitcode.InstructionContent
+ret = Bitcode.Return . Bitcode.ReturnContent . Just 
+
+-- | helper non monadic function for return value
+loc :: Bitcode.TmpVariable -> Location
+loc = Bitcode.tmpVariableLocation
+
+-- | helper non monadic function for return value
+assemble :: Location -> Bitcode.InstructionContent -> Cfg
+assemble = fmap (Cfg.atom . Node) . Bitcode.Instruction
 
 -- | helper non monadic function for return instruction (as an atom cfg)
-singleReturnSite :: Ast.DecFuncContent -> CodeGenState -> Cfg
-singleReturnSite tmpVariable location = let
-    ret = Bitcode.Return $ Bitcode.ReturnContent (Just tmpVariable)
-    in Cfg.atom $ Node { theInstructionInside = Bitcode.Instruction location ret }
+singleReturnSite :: Bitcode.TmpVariable -> Cfg
+singleReturnSite returnedValue = assemble (loc returnedValue) (ret returnedValue)
 
-instrumentReturn :: Ast.DecFuncContent -> CodeGenState -> CodeGenState
-instrumentReturn decFunc ctx = let
+-- | non monadic function
+instrumentReturn' :: Ast.DecFuncContent -> CodeGenState -> CodeGenState
+instrumentReturn' decFunc ctx = let
     returnedValue' = returnedValue decFunc ctx
-    returnSite = singleReturnSite decFunc ctx
+    returnSite = singleReturnSite returnedValue'
     in ctx { returnValue = returnedValue', returnTo = returnSite }
+
+instrumentReturn :: Ast.DecFuncContent -> CodeGenContext Cfg
+instrumentReturn decFunc ctx = do { ctx <- get;
+    put $ instrumentReturn' decFunc ctx; ctx <- get;
+    return $ returnTo ctx
+}
+
+cleanReturnInstrumentation :: CodeGenState -> CodeGenState
+cleanReturnInstrumentation ctx = ctx { returnValue = Nothing, returnTo = Nothing } 
 
 -- |
 -- * create the prologue + body and concatenate them
@@ -178,10 +198,10 @@ instrumentReturn decFunc ctx = let
 codeGenDecFunc :: Ast.DecFuncContent -> CodeGenContext Cfg
 codeGenDecFunc decFunc = do { ctx <- get;
     prologue <- codeGenDecFuncBody decFunc;
-    put $ instrumentReturn decFunc ctx;
+    returnSite <- instrumentReturn decFunc ctx;
     body <- codeGenDecFuncBody decFunc;
     put $ cleanReturnInstrumentation ctx;
-    return $ prologue `Cfg.concat` body `Cfg.concat` (ret'' decFunc ctx)
+    return $ foldl' Cfg.concat prologue [body,returnSite]
 }
 
 codeGenDecFuncBody :: Ast.DecFuncContent -> CodeGenContext Cfg
@@ -197,11 +217,20 @@ codeGenStmt :: Ast.Stmt -> CodeGenContext Cfg
 codeGenStmt (Ast.StmtWhile stmtWhile) = codeGenStmtWhile stmtWhile
 codeGenStmt _ = undefined
 
+instrumentLoopHeader :: Ast.StmtWhileContent -> Cfg
+instrumentLoopHeader stmtWhile = undefined
+
+instrumentLoopExit:: Ast.StmtWhileContent -> Cfg
+instrumentLoopExit stmtWhile = undefined
+
 instrumentWhileLoop :: Ast.StmtWhileContent -> CodeGenState -> CodeGenState
 instrumentWhileLoop stmtWhile ctx = let
-     loopHeader = instrumentLoopHeader
-     loopExit = instrumentLoopExit
+     loopHeader = instrumentLoopHeader stmtWhile
+     loopExit = instrumentLoopExit stmtWhile
      in ctx { continueTo = loopHeader, breakTo = loopExit }
+
+cleanWhileLoopInstrumentation :: CodeGenState -> CodeGenState
+cleanWhileLoopInstrumentation ctx = ctx { breakTo = Nothing, continueTo = Nothing } 
 
 -- | trivial monadic helper functions
 codeGenStmtWhileCond :: Ast.StmtWhileContent -> CodeGenContext (Bitcode.TmpVariable,Cfg)
