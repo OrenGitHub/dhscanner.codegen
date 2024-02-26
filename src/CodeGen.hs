@@ -30,20 +30,30 @@ import qualified SymbolTable
 
 -- general imports
 import Data.List
+import Control.Arrow
 import Control.Monad.State.Lazy
 import Control.Monad ( foldM )
 
 data CodeGenState
    = CodeGenState
      {
-         symbolTable :: SymbolTable
+         symbolTable :: SymbolTable,
+         returnValue :: Maybe Bitcode.TmpVariable,
+         returnTo :: Maybe Cfg,
+         continueTo :: Maybe Cfg,
+         breakTo :: Maybe Cfg
      }
      deriving ( Show )
 
--- | Mostly for readability
 type CodeGenContext = State CodeGenState
 
-initCodeGenState = CodeGenState emptySymbolTable
+initCodeGenState = CodeGenState {
+    symbolTable = emptySymbolTable,
+    returnValue = Nothing,
+    returnTo = Nothing,
+    continueTo = Nothing,
+    breakTo = Nothing
+}
 
 -- | API (non monadic)
 codeGen :: Asts -> [ Cfg ]
@@ -86,7 +96,7 @@ codeGenDecVarNoInit' decVar ctx = let
     nominalType = Token.getNominalTyToken (Ast.decVarNominalType decVar) 
     actualType = SymbolTable.lookup nominalType (symbolTable ctx)
     symbolTable' = SymbolTable.insert varName actualType (symbolTable ctx)
-    in CodeGenState { symbolTable = symbolTable' }
+    in ctx { symbolTable = symbolTable' }
 
 -- |
 -- * update the symbol table with the declared variable
@@ -102,7 +112,7 @@ codeGenDecVarNoInit decVar = do {
 codeGenDecVarInitialized' :: Token.VarName -> ActualType -> CodeGenState -> CodeGenState
 codeGenDecVarInitialized' varName actualType ctx = let
     symbolTable' = SymbolTable.insert (Token.getVarNameToken varName) actualType (symbolTable ctx)
-    in CodeGenState { symbolTable = symbolTable' }
+    in ctx { symbolTable = symbolTable' }
 
 -- | Non monadic helper function for creating the cfg of the init value
 codeGenDecVarInitialized'' :: Token.VarName -> (Cfg, Bitcode.TmpVariable) -> Cfg
@@ -129,6 +139,26 @@ codeGenDecVarInitialized varName nominalType initValue = do {
     return $ codeGenDecVarInitialized'' varName (cfg, tmpVariable)
 }
 
+-- | helper non monadic function
+returnType :: decFunc -> CodeGenState -> ActualType
+returnType d ctx = ActualType.returnType (SymbolTable.lookupDecFunc d (symbolTable ctx))
+
+-- | helper non monadic function for return value
+returnedValue :: Ast.DecFuncContent -> CodeGenState -> Bitcode.TmpVariable
+returnedValue d ctx = Bitcode.TmpVariable (Ast.locationDec d) (returnType d ctx)
+
+-- | helper non monadic function for return instruction (as an atom cfg)
+singleReturnSite :: Ast.DecFuncContent -> CodeGenState -> Cfg
+singleReturnSite tmpVariable location = let
+    ret = Bitcode.Return $ Bitcode.ReturnContent (Just tmpVariable)
+    in Cfg.atom $ Node { theInstructionInside = Bitcode.Instruction location ret }
+
+instrumentReturn :: Ast.DecFuncContent -> CodeGenState -> CodeGenState
+instrumentReturn decFunc ctx = let
+    returnedValue' = returnedValue decFunc ctx
+    returnSite = singleReturnSite decFunc ctx
+    in ctx { returnValue = returnedValue', returnTo = returnSite }
+
 -- |
 -- * create the prologue + body and concatenate them
 --
@@ -136,10 +166,12 @@ codeGenDecVarInitialized varName nominalType initValue = do {
 -- already exists in it
 --
 codeGenDecFunc :: Ast.DecFuncContent -> CodeGenContext Cfg
-codeGenDecFunc decFunc = do {
+codeGenDecFunc decFunc = do { ctx <- get;
     prologue <- codeGenDecFuncBody decFunc;
+    put $ instrumentReturn decFunc ctx;
     body <- codeGenDecFuncBody decFunc;
-    return $ prologue `Cfg.concat` body
+    put $ cleanReturnInstrumentation ctx;
+    return $ prologue `Cfg.concat` body `Cfg.concat` (ret'' decFunc ctx)
 }
 
 codeGenDecFuncBody :: Ast.DecFuncContent -> CodeGenContext Cfg
@@ -155,10 +187,27 @@ codeGenStmt :: Ast.Stmt -> CodeGenContext Cfg
 codeGenStmt (Ast.StmtWhile stmtWhile) = codeGenStmtWhile stmtWhile
 codeGenStmt _ = undefined
 
+instrumentWhileLoop :: Ast.StmtWhileContent -> CodeGenState -> CodeGenState
+instrumentWhileLoop stmtWhile ctx = let
+     loopHeader = instrumentLoopHeader
+     loopExit = instrumentLoopExit
+     in ctx { continueTo = loopHeader, breakTo = loopExit }
+
+-- | trivial monadic helper functions
+codeGenStmtWhileCond :: Ast.StmtWhileContent -> CodeGenContext (Bitcode.TmpVariable,Cfg)
+codeGenStmtWhileCond = codeGenExp . Ast.stmtWhileCond
+
+-- | trivial monadic helper functions
+codeGenStmtWhileBody :: Ast.StmtWhileContent -> CodeGenContext Cfg
+codeGenStmtWhileBody = uncarry codeGenStmts (Ast.stmtWhileBody &&& Ast.stmtWhileLocation)
+
+-- | code generation for while loops
 codeGenStmtWhile :: Ast.StmtWhileContent -> CodeGenContext Cfg
-codeGenStmtWhile stmtWhile = do {
-    (cfgCond, tmpVariableCond) <- codeGenExp (Ast.stmtWhileCond stmtWhile);
-    cfgBody <- codeGenStmts (Ast.stmtWhileBody stmtWhile) (Ast.stmtWhileLocation stmtWhile);
+codeGenStmtWhile stmtWhile = do { ctx <- get;
+    (cfgCond, tmpVariableCond) <- codeGenStmtWhileCond stmtWhile;
+    put $ instrumentWhileLoop stmtWhile ctx;
+    cfgBody <- codeGenStmtWhileBody stmtWhile;
+    put $ cleanWhileLoopInstrumentation ctx;
     return $ Cfg.loopify cfgCond cfgBody tmpVariableCond
 }
 
