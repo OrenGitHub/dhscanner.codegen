@@ -147,11 +147,11 @@ returnType'' _ = ActualType.Any
 
 -- | helper non monadic function
 returnType' :: Token.Named -> SymbolTable -> ActualType
-returnType' name symbolTable = returnType'' $ SymbolTable.lookup name symbolTable
+returnType' = fmap returnType'' . SymbolTable.lookup
 
 -- | helper non monadic function
 returnType :: Ast.DecFuncContent -> CodeGenState -> ActualType.ActualType
-returnType = returnType' (Token.getFuncNameToken . Ast.decFuncName *** symbolTable)
+returnType d ctx = returnType' ((Token.getFuncNameToken . Ast.decFuncName) d) (symbolTable ctx)
 
 -- | helper non monadic function for return value
 returnedValue :: Ast.DecFuncContent -> CodeGenState -> Bitcode.TmpVariable
@@ -173,17 +173,15 @@ assemble = fmap (Cfg.atom . Node) . Bitcode.Instruction
 singleReturnSite :: Bitcode.TmpVariable -> Cfg
 singleReturnSite returnedValue = assemble (loc returnedValue) (ret returnedValue)
 
--- | non monadic function
-instrumentReturn' :: Ast.DecFuncContent -> CodeGenState -> CodeGenState
-instrumentReturn' decFunc ctx = let
-    returnedValue' = returnedValue decFunc ctx
-    returnSite = singleReturnSite returnedValue'
-    in ctx { returnValue = returnedValue', returnTo = returnSite }
-
-instrumentReturn :: Ast.DecFuncContent -> CodeGenContext Cfg
-instrumentReturn decFunc ctx = do { ctx <- get;
-    put $ instrumentReturn' decFunc ctx; ctx <- get;
-    return $ returnTo ctx
+instrumentReturn :: Ast.DecFuncContent -> CodeGenContext ()
+instrumentReturn decFunc = do { ctx <- get;
+    put $ let r = returnedValue decFunc ctx in CodeGenState {
+        symbolTable = symbolTable ctx,
+        returnValue = Just r,
+        returnTo = Just (singleReturnSite r),
+        continueTo = continueTo ctx,
+        breakTo = breakTo ctx
+    }
 }
 
 cleanReturnInstrumentation :: CodeGenState -> CodeGenState
@@ -198,10 +196,10 @@ cleanReturnInstrumentation ctx = ctx { returnValue = Nothing, returnTo = Nothing
 codeGenDecFunc :: Ast.DecFuncContent -> CodeGenContext Cfg
 codeGenDecFunc decFunc = do { ctx <- get;
     prologue <- codeGenDecFuncBody decFunc;
-    returnSite <- instrumentReturn decFunc ctx;
+    instrumentReturn decFunc;
     body <- codeGenDecFuncBody decFunc;
     put $ cleanReturnInstrumentation ctx;
-    return $ foldl' Cfg.concat prologue [body,returnSite]
+    return $ prologue Cfg.concat body
 }
 
 codeGenDecFuncBody :: Ast.DecFuncContent -> CodeGenContext Cfg
