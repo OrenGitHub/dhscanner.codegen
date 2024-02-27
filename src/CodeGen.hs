@@ -199,7 +199,7 @@ codeGenDecFunc decFunc = do { ctx <- get;
     instrumentReturn decFunc;
     body <- codeGenDecFuncBody decFunc;
     put $ cleanReturnInstrumentation ctx;
-    return $ prologue Cfg.concat body
+    return $ prologue `Cfg.concat` body
 }
 
 codeGenDecFuncBody :: Ast.DecFuncContent -> CodeGenContext Cfg
@@ -225,18 +225,18 @@ instrumentWhileLoop :: Ast.StmtWhileContent -> CodeGenState -> CodeGenState
 instrumentWhileLoop stmtWhile ctx = let
      loopHeader = instrumentLoopHeader stmtWhile
      loopExit = instrumentLoopExit stmtWhile
-     in ctx { continueTo = loopHeader, breakTo = loopExit }
+     in ctx { continueTo = Just loopHeader, breakTo = Just loopExit }
 
 cleanWhileLoopInstrumentation :: CodeGenState -> CodeGenState
 cleanWhileLoopInstrumentation ctx = ctx { breakTo = Nothing, continueTo = Nothing } 
 
 -- | trivial monadic helper functions
-codeGenStmtWhileCond :: Ast.StmtWhileContent -> CodeGenContext (Bitcode.TmpVariable,Cfg)
+codeGenStmtWhileCond :: Ast.StmtWhileContent -> CodeGenContext (Cfg,Bitcode.TmpVariable)
 codeGenStmtWhileCond = codeGenExp . Ast.stmtWhileCond
 
 -- | trivial monadic helper functions
 codeGenStmtWhileBody :: Ast.StmtWhileContent -> CodeGenContext Cfg
-codeGenStmtWhileBody = uncurry codeGenStmts (Ast.stmtWhileBody &&& Ast.stmtWhileLocation)
+codeGenStmtWhileBody = uncurry codeGenStmts . (Ast.stmtWhileBody &&& Ast.stmtWhileLocation)
 
 -- | code generation for while loops
 codeGenStmtWhile :: Ast.StmtWhileContent -> CodeGenContext Cfg
