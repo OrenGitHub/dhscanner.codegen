@@ -16,7 +16,6 @@ import Bitcode (
     assignInput,
     assignOutput,
     location,
-    actualType,
     instructionContent)
 import SymbolTable (
     SymbolTable,
@@ -110,15 +109,16 @@ codeGenDecVarNoInit decVar = do {
 }
 
 -- | Non monadic helper function for updating the symbol table
-codeGenDecVarInitialized' :: Token.VarName -> ActualType -> CodeGenState -> CodeGenState
-codeGenDecVarInitialized' varName actualType ctx = let
-    symbolTable' = SymbolTable.insert (Token.getVarNameToken varName) actualType (symbolTable ctx)
+codeGenDecVarInitialized' :: Token.VarName -> Ast.Exp -> CodeGenState -> CodeGenState
+codeGenDecVarInitialized' varName initValue ctx = let
+    (cfg, tmpVariable, actualType) = codeGenExp initValue ctx
+    symbolTable' = SymbolTable.insertVarName varName actualType (symbolTable ctx)
     in ctx { symbolTable = symbolTable' }
 
 -- | Non monadic helper function for creating the cfg of the init value
-codeGenDecVarInitialized'' :: Token.VarName -> (Cfg, Bitcode.TmpVariable) -> Cfg
-codeGenDecVarInitialized'' varName (cfg, tmpVariable) = let
-    srcVariable = Bitcode.SrcVariableCtor $ Bitcode.SrcVariable varName
+codeGenDecVarInitialized'' :: Token.VarName -> Fqn -> (Cfg, Bitcode.TmpVariable) -> Cfg
+codeGenDecVarInitialized'' varName fqn (cfg, tmpVariable) = let
+    srcVariable = Bitcode.SrcVariableCtor $ Bitcode.SrcVariable fqn varName
     assignContent = Bitcode.AssignContent { assignOutput = srcVariable, assignInput = tmpVariable }
     assign = Bitcode.Assign assignContent
     location' = Token.getVarNameLocation varName
@@ -134,11 +134,11 @@ codeGenDecVarInitialized'' varName (cfg, tmpVariable) = let
 --
 -- * return the resulted cfg
 codeGenDecVarInitialized :: Token.VarName -> Token.NominalTy -> Ast.Exp -> CodeGenContext Cfg
-codeGenDecVarInitialized varName nominalType initValue = do {
-    (cfg, tmpVariable) <- codeGenExp initValue; ctx <- get;
-    put (codeGenDecVarInitialized' varName (Bitcode.actualType tmpVariable) ctx);
-    return $ codeGenDecVarInitialized'' varName (cfg, tmpVariable)
-}
+codeGenDecVarInitialized varName nominalType initValue = do
+    ctx <- get;
+    let (cfg, tmpVariable, actualType) = codeGenExp initValue ctx 
+    put $ codeGenDecVarInitialized' varName initValue ctx;
+    return $ codeGenDecVarInitialized'' varName (Fqn.convertFrom actualType) (cfg, tmpVariable)
 
 -- | helper non monadic function
 returnType'' :: ActualType -> ActualType
@@ -155,7 +155,7 @@ returnType d ctx = returnType' ((Token.getFuncNameToken . Ast.decFuncName) d) (s
 
 -- | helper non monadic function for return value
 returnedValue :: Ast.DecFuncContent -> CodeGenState -> Bitcode.TmpVariable
-returnedValue d ctx = Bitcode.TmpVariable (returnType d ctx) (Ast.decFuncLocation d)
+returnedValue d ctx = Bitcode.TmpVariable (Fqn.convertFrom (returnType d ctx)) (Ast.decFuncLocation d)
 
 -- | helper non monadic function for return value
 ret :: Bitcode.TmpVariable -> Bitcode.InstructionContent
@@ -231,8 +231,8 @@ cleanWhileLoopInstrumentation :: CodeGenState -> CodeGenState
 cleanWhileLoopInstrumentation ctx = ctx { breakTo = Nothing, continueTo = Nothing } 
 
 -- | trivial monadic helper functions
-codeGenStmtWhileCond :: Ast.StmtWhileContent -> CodeGenContext (Cfg,Bitcode.TmpVariable)
-codeGenStmtWhileCond = codeGenExp . Ast.stmtWhileCond
+codeGenStmtWhileCond :: Ast.StmtWhileContent -> CodeGenState -> (Cfg,Bitcode.TmpVariable,ActualType)
+codeGenStmtWhileCond stmtWhile ctx = codeGenExp (Ast.stmtWhileCond stmtWhile) ctx
 
 -- | trivial monadic helper functions
 codeGenStmtWhileBody :: Ast.StmtWhileContent -> CodeGenContext Cfg
@@ -240,13 +240,13 @@ codeGenStmtWhileBody = uncurry codeGenStmts . (Ast.stmtWhileBody &&& Ast.stmtWhi
 
 -- | code generation for while loops
 codeGenStmtWhile :: Ast.StmtWhileContent -> CodeGenContext Cfg
-codeGenStmtWhile stmtWhile = do { ctx <- get;
-    (cfgCond, tmpVariableCond) <- codeGenStmtWhileCond stmtWhile;
+codeGenStmtWhile stmtWhile = do
+    ctx <- get;
+    let (cfgCond, tmpVariableCond, actualType) = codeGenStmtWhileCond stmtWhile ctx;
     put $ instrumentWhileLoop stmtWhile ctx;
     cfgBody <- codeGenStmtWhileBody stmtWhile;
     put $ cleanWhileLoopInstrumentation ctx;
     return $ Cfg.loopify cfgCond cfgBody tmpVariableCond
-}
 
 -- | Non monadic helper function
 codeGenStmtReturnValue' :: Ast.Exp -> Cfg -> Bitcode.TmpVariable -> Cfg
@@ -257,11 +257,12 @@ codeGenStmtReturnValue' value cfg tmpVariable = let
     in cfg `Cfg.concat` (Cfg.atom (Node instruction))
 
 codeGenStmtReturnValue :: Ast.Exp -> CodeGenContext Cfg
-codeGenStmtReturnValue value = do {
-    (cfg, tmpVariable) <- codeGenExp value;
-    return $ codeGenStmtReturnValue' value cfg tmpVariable
-}
+codeGenStmtReturnValue value = do
+    ctx <- get;
+    return $ let (cfg, tmpVariable, actualType) = codeGenExp value ctx
+        in codeGenStmtReturnValue' value cfg tmpVariable
 
+-- |
 codeGenStmtReturnNoValue :: Ast.StmtReturnContent -> CodeGenContext Cfg
 codeGenStmtReturnNoValue returnStmt = return $ let
     location = Ast.stmtReturnLocation returnStmt
@@ -269,27 +270,34 @@ codeGenStmtReturnNoValue returnStmt = return $ let
     instruction = Bitcode.Instruction location bitcodeReturn
     in Cfg.atom (Node instruction)
 
+-- | Pseudo code for return statements:
+-- @
+--     return 88;
+--
+--     Temp_749 := 88
+--     Temp_155 := Temp_749 --- cfg edge --> return Temp_155
+--     Assume False
+--
+-- @
+--
 codeGenStmtReturn :: Ast.StmtReturnContent -> CodeGenContext Cfg
 codeGenStmtReturn stmtReturn = case Ast.stmtReturnValue stmtReturn of
     Nothing -> codeGenStmtReturnNoValue stmtReturn
     Just value -> codeGenStmtReturnValue value
 
-codeGenExp :: Ast.Exp -> CodeGenContext (Cfg, Bitcode.TmpVariable)
-codeGenExp (Ast.ExpInt   expInt  ) = codeGenExpInt   expInt
-codeGenExp (Ast.ExpStr   expStr  ) = undefined
-codeGenExp (Ast.ExpVar   expVar  ) = undefined
-codeGenExp (Ast.ExpCall  expCall ) = undefined
-codeGenExp (Ast.ExpBinop expBinop) = undefined
+codeGenExp :: Ast.Exp -> CodeGenState -> (Cfg, Bitcode.TmpVariable, ActualType)
+codeGenExp (Ast.ExpInt   expInt  ) _ = codeGenExpInt expInt
+codeGenExp (Ast.ExpStr   expStr  ) _ = undefined
+codeGenExp (Ast.ExpVar   expVar  ) _ = undefined
+codeGenExp (Ast.ExpCall  expCall ) _ = undefined
+codeGenExp (Ast.ExpBinop expBinop) _ = undefined
 
-mkFreshIntTmp :: Location -> Bitcode.TmpVariable
-mkFreshIntTmp l = Bitcode.TmpVariable { actualType = ActualType.nativeTypeInt, Bitcode.tmpVariableLocation = l }
-
-codeGenExpInt :: Ast.ExpIntContent -> CodeGenContext (Cfg, Bitcode.TmpVariable)
-codeGenExpInt expIntContent = return $ let
-    constInt = Ast.expIntValue expIntContent
-    location = Token.constIntLocation constInt
-    tmpVariable = mkFreshIntTmp location
+codeGenExpInt :: Ast.ExpIntContent -> (Cfg, Bitcode.TmpVariable, ActualType)
+codeGenExpInt expInt = let
+    constInt = Ast.expIntValue expInt
+    location = Ast.locationExpInt expInt
+    tmpVariable = Bitcode.TmpVariable Fqn.nativeInt location
     loadImmInt = Bitcode.LoadImmContentInt tmpVariable constInt
-    loadImm = Bitcode.LoadImm loadImmInt
-    in (Cfg.atom (Node (Bitcode.Instruction location loadImm)), tmpVariable)
+    instruction = Bitcode.Instruction location $ Bitcode.LoadImm loadImmInt
+    in (Cfg.atom $ Node instruction, tmpVariable, ActualType.nativeTypeInt)
 
