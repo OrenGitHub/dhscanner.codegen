@@ -213,6 +213,7 @@ codeGenStmts' = mapM codeGenStmt
 
 codeGenStmt :: Ast.Stmt -> CodeGenContext Cfg
 codeGenStmt (Ast.StmtWhile stmtWhile) = codeGenStmtWhile stmtWhile
+codeGenStmt (Ast.StmtReturn stmtReturn) = do { ctx <- get; return $ codeGenStmtReturn stmtReturn ctx }
 codeGenStmt _ = undefined
 
 instrumentLoopHeader :: Ast.StmtWhileContent -> Cfg
@@ -256,15 +257,14 @@ codeGenStmtReturnValue' value cfg tmpVariable = let
     instruction = Bitcode.Instruction location bitcodeReturn
     in cfg `Cfg.concat` (Cfg.atom (Node instruction))
 
-codeGenStmtReturnValue :: Ast.Exp -> CodeGenContext Cfg
-codeGenStmtReturnValue value = do
-    ctx <- get;
-    return $ let (cfg, tmpVariable, actualType) = codeGenExp value ctx
-        in codeGenStmtReturnValue' value cfg tmpVariable
+codeGenStmtReturnValue :: Ast.Exp -> CodeGenState -> Cfg
+codeGenStmtReturnValue value ctx = let
+    (cfg, tmpVariable, actualType) = codeGenExp value ctx
+    in codeGenStmtReturnValue' value cfg tmpVariable
 
 -- |
-codeGenStmtReturnNoValue :: Ast.StmtReturnContent -> CodeGenContext Cfg
-codeGenStmtReturnNoValue returnStmt = return $ let
+codeGenStmtReturnNoValue :: Ast.StmtReturnContent -> CodeGenState -> Cfg
+codeGenStmtReturnNoValue returnStmt ctx = let
     location = Ast.stmtReturnLocation returnStmt
     bitcodeReturn = Bitcode.Return $ Bitcode.ReturnContent Nothing
     instruction = Bitcode.Instruction location bitcodeReturn
@@ -280,10 +280,10 @@ codeGenStmtReturnNoValue returnStmt = return $ let
 --
 -- @
 --
-codeGenStmtReturn :: Ast.StmtReturnContent -> CodeGenContext Cfg
-codeGenStmtReturn stmtReturn = case Ast.stmtReturnValue stmtReturn of
-    Nothing -> codeGenStmtReturnNoValue stmtReturn
-    Just value -> codeGenStmtReturnValue value
+codeGenStmtReturn :: Ast.StmtReturnContent -> CodeGenState -> Cfg
+codeGenStmtReturn stmtReturn ctx = case Ast.stmtReturnValue stmtReturn of
+    Nothing -> codeGenStmtReturnNoValue stmtReturn ctx
+    Just value -> codeGenStmtReturnValue value ctx
 
 codeGenExp :: Ast.Exp -> CodeGenState -> (Cfg, Bitcode.TmpVariable, ActualType)
 codeGenExp (Ast.ExpInt   expInt  ) _ = codeGenExpInt expInt
