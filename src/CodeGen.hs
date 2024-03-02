@@ -79,14 +79,38 @@ codeGenDec (Ast.DecClass  decClass ) = undefined
 codeGenDec (Ast.DecMethod decMethod) = undefined
 codeGenDec (Ast.DecImport decImport) = undefined
 
--- | split depending on the existence of init value
+-- |
+-- * Monadic operation
+--
+-- * adds declared variable to symbol table
+--
+-- * Generating the initial value (if it exists) is non monadic
+--
 codeGenDecVar :: Ast.DecVarContent -> CodeGenContext Cfg
-codeGenDecVar decVar = case Ast.decVarInitValue decVar of
-    Nothing -> codeGenDecVarNoInit decVar
-    Just initValue -> let
-        varName = Ast.decVarName decVar
-        nominalType = Ast.decVarNominalType decVar
-        in codeGenDecVarInitialized varName nominalType initValue
+codeGenDecVar d = case Ast.decVarInitValue d of
+    Nothing -> codeGenDecVarNoInit d (Token.getVarNameLocation (Ast.decVarName d))
+    Just init -> codeGenDecVarInit (Ast.decVarName d) (Ast.decVarNominalType d) init
+
+-- |
+-- * update the symbol table with the declared variable
+--
+-- * return an empty cfg (nop) since nothing happens (no init)
+codeGenDecVarNoInit :: Ast.DecVarContent -> Location -> CodeGenContext Cfg
+codeGenDecVarNoInit d loc = do { ctx <- get; put (codeGenDecVarNoInit' d ctx); return $ Cfg.empty loc }
+
+-- |
+-- * update the symbol table with the declared variable
+--
+-- * generate the code for the init value
+--
+-- * append an assign instruction for the init value
+--
+-- * return the resulted cfg
+--
+codeGenDecVarInit :: Token.VarName -> Token.NominalTy -> Ast.Exp -> CodeGenContext Cfg
+codeGenDecVarInit varName nominalType init = do
+    ctx <- get; let { (cfg, t, actualType) = codeGenExp init ctx; fqn = Fqn.convertFrom actualType }
+    put $ codeGenDecVarInit' varName init ctx; return $ codeGenDecVarInit'' varName fqn (cfg, t)
 
 -- | pure non-monadic function, just update
 -- the symbol table with the declared variable
@@ -98,47 +122,22 @@ codeGenDecVarNoInit' decVar ctx = let
     symbolTable' = SymbolTable.insert varName actualType (symbolTable ctx)
     in ctx { symbolTable = symbolTable' }
 
--- |
--- * update the symbol table with the declared variable
---
--- * return an empty cfg (nop) since nothing happens (no init)
-codeGenDecVarNoInit :: Ast.DecVarContent -> CodeGenContext Cfg
-codeGenDecVarNoInit decVar = do {
-    ctx <- get; put (codeGenDecVarNoInit' decVar ctx);
-    return $ Cfg.empty (Token.getVarNameLocation (Ast.decVarName decVar))
-}
-
 -- | Non monadic helper function for updating the symbol table
-codeGenDecVarInitialized' :: Token.VarName -> Ast.Exp -> CodeGenState -> CodeGenState
-codeGenDecVarInitialized' varName initValue ctx = let
+codeGenDecVarInit' :: Token.VarName -> Ast.Exp -> CodeGenState -> CodeGenState
+codeGenDecVarInit' varName initValue ctx = let
     (cfg, tmpVariable, actualType) = codeGenExp initValue ctx
     symbolTable' = SymbolTable.insertVarName varName actualType (symbolTable ctx)
     in ctx { symbolTable = symbolTable' }
 
 -- | Non monadic helper function for creating the cfg of the init value
-codeGenDecVarInitialized'' :: Token.VarName -> Fqn -> (Cfg, Bitcode.TmpVariable) -> Cfg
-codeGenDecVarInitialized'' varName fqn (cfg, tmpVariable) = let
+codeGenDecVarInit'' :: Token.VarName -> Fqn -> (Cfg, Bitcode.TmpVariable) -> Cfg
+codeGenDecVarInit'' varName fqn (cfg, tmpVariable) = let
     srcVariable = Bitcode.SrcVariableCtor $ Bitcode.SrcVariable fqn varName
     assignContent = Bitcode.AssignContent { assignOutput = srcVariable, assignInput = tmpVariable }
     assign = Bitcode.Assign assignContent
     location' = Token.getVarNameLocation varName
     instruction = Bitcode.Instruction { Bitcode.location = location', instructionContent = assign }
     in cfg `Cfg.concat` (Cfg.atom (Node instruction))
-
--- |
--- * update the symbol table with the declared variable
---
--- * generate the code for the init value
---
--- * append an assign instruction for the init value
---
--- * return the resulted cfg
-codeGenDecVarInitialized :: Token.VarName -> Token.NominalTy -> Ast.Exp -> CodeGenContext Cfg
-codeGenDecVarInitialized varName nominalType initValue = do
-    ctx <- get;
-    let (cfg, tmpVariable, actualType) = codeGenExp initValue ctx 
-    put $ codeGenDecVarInitialized' varName initValue ctx;
-    return $ codeGenDecVarInitialized'' varName (Fqn.convertFrom actualType) (cfg, tmpVariable)
 
 -- | helper non monadic function
 returnType'' :: ActualType -> ActualType
@@ -158,20 +157,12 @@ returnedValue :: Ast.DecFuncContent -> CodeGenState -> Bitcode.TmpVariable
 returnedValue d ctx = Bitcode.TmpVariable (Fqn.convertFrom (returnType d ctx)) (Ast.decFuncLocation d)
 
 -- | helper non monadic function for return value
-ret :: Bitcode.TmpVariable -> Bitcode.InstructionContent
-ret = Bitcode.Return . Bitcode.ReturnContent . Just 
-
--- | helper non monadic function for return value
-loc :: Bitcode.TmpVariable -> Location
-loc = Bitcode.tmpVariableLocation
-
--- | helper non monadic function for return value
 assemble :: Location -> Bitcode.InstructionContent -> Cfg
 assemble = fmap (Cfg.atom . Node) . Bitcode.Instruction
 
 -- | helper non monadic function for return instruction (as an atom cfg)
 singleReturnSite :: Bitcode.TmpVariable -> Cfg
-singleReturnSite returnedValue = assemble (loc returnedValue) (ret returnedValue)
+singleReturnSite = (uncurry assemble) . (Bitcode.tmpVariableLocation &&& (Bitcode.Return . Bitcode.ReturnContent . Just))
 
 instrumentReturn :: Ast.DecFuncContent -> CodeGenContext ()
 instrumentReturn decFunc = do { ctx <- get;
