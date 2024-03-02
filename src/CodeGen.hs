@@ -287,7 +287,7 @@ codeGenStmtReturn stmtReturn ctx = case Ast.stmtReturnValue stmtReturn of
 
 codeGenExp :: Ast.Exp -> CodeGenState -> (Cfg, Bitcode.TmpVariable, ActualType)
 codeGenExp (Ast.ExpInt   expInt  ) _ = codeGenExpInt expInt
-codeGenExp (Ast.ExpStr   expStr  ) _ = undefined
+codeGenExp (Ast.ExpStr   expStr  ) _ = codeGenExpStr expStr
 codeGenExp (Ast.ExpVar   expVar  ) _ = undefined
 codeGenExp (Ast.ExpCall  expCall ) _ = undefined
 codeGenExp (Ast.ExpBinop expBinop) _ = undefined
@@ -300,4 +300,13 @@ codeGenExpInt expInt = let
     loadImmInt = Bitcode.LoadImmContentInt tmpVariable constInt
     instruction = Bitcode.Instruction location $ Bitcode.LoadImm loadImmInt
     in (Cfg.atom $ Node instruction, tmpVariable, ActualType.nativeTypeInt)
+
+codeGenExpStr :: Ast.ExpStrContent -> (Cfg, Bitcode.TmpVariable, ActualType)
+codeGenExpStr expStr = let
+    constStr = Ast.expStrValue expStr
+    location = Ast.locationExpStr expStr
+    tmpVariable = Bitcode.TmpVariable Fqn.nativeStr location
+    loadImmStr = Bitcode.LoadImmContentStr tmpVariable constStr
+    instruction = Bitcode.Instruction location $ Bitcode.LoadImm loadImmStr
+    in (Cfg.atom $ Node instruction, tmpVariable, ActualType.nativeTypeStr)
 
