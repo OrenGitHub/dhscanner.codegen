@@ -45,7 +45,9 @@ insert name actualType symbolTable = let
     currentScope' = Scope $ Data.Map.insert (Token.content name) actualType currentScope
     in SymbolTable { scopes = currentScope' : (tail (scopes symbolTable)) }
 
--- 
+insertVarName :: Token.VarName -> ActualType -> SymbolTable -> SymbolTable
+insertVarName = insert . Token.getVarNameToken
+
 lookup :: Token.Named -> SymbolTable -> ActualType
 lookup name table = case lookup' (Token.content name) (scopes table) of
     Nothing -> NativeType $ NativeTypeAny

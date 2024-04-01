@@ -34,6 +34,13 @@ data Classes
      }
      deriving ( Show, Eq, Ord, Generic, ToJSON, FromJSON )
 
+data Functions
+   = Functions
+     {
+         actualFunctions :: Map String ClassContent
+     }
+     deriving ( Show, Eq, Ord, Generic, ToJSON, FromJSON )
+
 -- addMethod :: Ast.DecMethodContent -> Ast.DecClassContent -> Classes -> Classes
 -- addMethod m c classes = Classes { actualClasses = actualClasses' }
 --    where
@@ -102,6 +109,7 @@ data Param
      deriving ( Show, Eq, Ord, Generic, ToJSON, FromJSON )
 
 nativeTypeInt = NativeType NativeTypeInt
+nativeTypeStr = NativeType NativeTypeStr
 
 data NativeTypeContent
    = NativeTypeInt
