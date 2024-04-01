@@ -49,8 +49,6 @@ executable codegen
         Bitcode,
         CodeGen,
         Location,
-        Callable,
-        Packages,
         ActualType,
         SymbolTable
 
