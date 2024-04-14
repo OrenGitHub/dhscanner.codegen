@@ -78,7 +78,7 @@ codeGenStmt :: Ast.Stmt -> CodeGenContext Cfg
 codeGenStmt (Ast.StmtIf     stmtIf    ) = undefined
 codeGenStmt (Ast.StmtCall   stmtCall  ) = undefined
 codeGenStmt (Ast.StmtDecvar stmtDecVar) = codeGenStmtDecvar stmtDecVar
-codeGenStmt (Ast.StmtAssign stmtAssign) = undefined
+codeGenStmt (Ast.StmtAssign stmtAssign) = codeGenStmtAssign stmtAssign
 codeGenStmt _                           = undefined
 
 -- | A simple dispatcher for code gen expressions
@@ -89,6 +89,55 @@ codeGenExp (Ast.ExpStr   expStr  ) _ = codeGenExpStr expStr
 codeGenExp (Ast.ExpVar   expVar  ) s = undefined
 codeGenExp (Ast.ExpCall  expCall ) s = undefined
 codeGenExp _ _                       = undefined
+
+-- | during stmt assign, it could be the case that
+-- a simple variable is also defined. if so, we need
+-- to insert it into the symbol table.
+createBitcodeVarIfNeeded :: Ast.VarSimpleContent -> CodeGenContext ()
+createBitcodeVarIfNeeded v = do { ctx <- get; put $ let 
+    bitcodeVar = Bitcode.SrcVariableCtor (Bitcode.SrcVariable Fqn.nativeInt (Ast.varName v))
+    bitcodeVarExists = SymbolTable.varExists (Ast.varName v) (symbolTable ctx)
+    symbolTable' = SymbolTable.insertVar (Ast.varName v) bitcodeVar ActualType.int (symbolTable ctx)
+    in case bitcodeVarExists of { True -> ctx; False -> ctx { symbolTable = symbolTable' } }
+}
+
+-- | dynamic languages often have variable declarations
+-- "hide" in plain assignment syntax - this means that
+-- assignment scanned according to their "ast order"
+-- will insert the assigned variable to the symbol table
+-- (if it hasn't been inserted before)
+codeGenStmtAssignToSimpleVar :: Ast.VarSimpleContent -> Ast.Exp -> CodeGenContext Cfg
+codeGenStmtAssignToSimpleVar astSimpleVar exp = do {
+    createBitcodeVarIfNeeded astSimpleVar;
+    ctx <- get; return $ let
+        (cfg, t, _) = codeGenExp exp ctx;
+        varName = Ast.varName astSimpleVar;
+        location = Token.getVarNameLocation varName;
+        dst = SymbolTable.lookupBitcodeVar (Token.getVarNameToken varName) (symbolTable ctx);
+        output = case dst of { Nothing -> Bitcode.TmpVariableCtor t; Just dst' -> dst' }
+        content = Bitcode.AssignContent output t;
+        instruction = Bitcode.Instruction location $ Bitcode.Assign content;
+        in Cfg.concat cfg (Cfg.atom $ Node instruction)
+}
+
+codeGenStmtAssignToFieldVar :: Ast.VarFieldContent -> Ast.Exp -> CodeGenContext Cfg
+codeGenStmtAssignToFieldVar v e = undefined
+
+-- codeGenStmtAssignToSubscriptVar :: Ast.VarSubscriptContent -> Ast.Exp -> CodeGenState -> (Cfg, Bitcode.TmpVariable, ActualType)
+-- codeGenStmtAssignToSubscriptVar v e ctx = undefined
+
+codeGenStmtAssign' :: Ast.Var -> Ast.Exp -> CodeGenContext Cfg
+codeGenStmtAssign' (Ast.VarSimple    v) e = codeGenStmtAssignToSimpleVar    v e
+codeGenStmtAssign' (Ast.VarField     v) e = codeGenStmtAssignToFieldVar     v e
+codeGenStmtAssign' _ _ = undefined -- codeGenStmtAssignToSubscriptVar v e
+
+-- | dynamic languages often have variable declarations
+-- "hide" in plain assignment syntax - this means that
+-- assignment scanned according to their "ast order"
+-- will insert the assigned variable to the symbol table
+-- (if it hasn't been inserted before)
+codeGenStmtAssign :: Ast.StmtAssignContent -> CodeGenContext Cfg
+codeGenStmtAssign s = codeGenStmtAssign' (Ast.stmtAssignLhs s) (Ast.stmtAssignRhs s) 
 
 -- |
 -- * Monadic operation
@@ -127,17 +176,20 @@ codeGenDecVarInit varName nominalType init = do
 -- the symbol table with the declared variable
 codeGenDecVarNoInit' :: Ast.DecVarContent -> CodeGenState -> CodeGenState
 codeGenDecVarNoInit' decVar ctx = let
-    varName = Token.getVarNameToken (Ast.decVarName decVar)
-    nominalType = Token.getNominalTyToken (Ast.decVarNominalType decVar) 
-    actualType = SymbolTable.lookup nominalType (symbolTable ctx)
-    symbolTable' = SymbolTable.insert varName actualType (symbolTable ctx)
+    varName = Ast.decVarName decVar
+    tokenName = Token.getVarNameToken varName
+    nominalType = Token.getNominalTyToken (Ast.decVarNominalType decVar)
+    bitcodeVar = Bitcode.SrcVariableCtor $ Bitcode.SrcVariable Fqn.nativeInt varName
+    actualType = SymbolTable.lookupActualType nominalType (symbolTable ctx)
+    symbolTable' = SymbolTable.insert tokenName bitcodeVar actualType (symbolTable ctx)
     in ctx { symbolTable = symbolTable' }
 
 -- | Non monadic helper function for updating the symbol table
 codeGenDecVarInit' :: Token.VarName -> Ast.Exp -> CodeGenState -> CodeGenState
 codeGenDecVarInit' varName initValue ctx = let
     (cfg, tmpVariable, actualType) = codeGenExp initValue ctx
-    symbolTable' = SymbolTable.insertVarName varName actualType (symbolTable ctx)
+    bitcodeVar = Bitcode.SrcVariableCtor $ Bitcode.SrcVariable Fqn.nativeInt varName
+    symbolTable' = SymbolTable.insertVar varName bitcodeVar actualType (symbolTable ctx)
     in ctx { symbolTable = symbolTable' }
 
 -- | Non monadic helper function for creating the cfg of the init value
@@ -157,7 +209,7 @@ codeGenExpInt expInt = let
     tmpVariable = Bitcode.TmpVariable Fqn.nativeInt location
     loadImmInt = Bitcode.LoadImmContentInt tmpVariable constInt
     instruction = Bitcode.Instruction location $ Bitcode.LoadImm loadImmInt
-    in (Cfg.atom $ Node instruction, tmpVariable, ActualType.nativeTypeInt)
+    in (Cfg.atom $ Node instruction, tmpVariable, ActualType.int)
 
 codeGenExpStr :: Ast.ExpStrContent -> (Cfg, Bitcode.TmpVariable, ActualType)
 codeGenExpStr expStr = let
@@ -166,7 +218,7 @@ codeGenExpStr expStr = let
     tmpVariable = Bitcode.TmpVariable Fqn.nativeStr location
     loadImmStr = Bitcode.LoadImmContentStr tmpVariable (Token.constStrValue constStr)
     instruction = Bitcode.Instruction location $ Bitcode.LoadImm loadImmStr
-    in (Cfg.atom $ Node instruction, tmpVariable, ActualType.nativeTypeStr)
+    in (Cfg.atom $ Node instruction, tmpVariable, ActualType.str)
 
 -- | Temporarily
 defaultLoc :: Location
