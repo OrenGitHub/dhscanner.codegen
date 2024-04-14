@@ -75,20 +75,26 @@ codeGenStmts' = mapM codeGenStmt
 -- | A simple dispatcher for code gen statements
 -- see `codeGenStmt<TheStatementKindYouWantToInspect>`
 codeGenStmt :: Ast.Stmt -> CodeGenContext Cfg
-codeGenStmt (Ast.StmtIf     stmtIf    ) = undefined
-codeGenStmt (Ast.StmtCall   stmtCall  ) = undefined
+codeGenStmt (Ast.StmtIf     stmtIf    ) = return $ Cfg.empty defaultLoc
+codeGenStmt (Ast.StmtCall   stmtCall  ) = return $ Cfg.empty defaultLoc
 codeGenStmt (Ast.StmtDecvar stmtDecVar) = codeGenStmtDecvar stmtDecVar
-codeGenStmt (Ast.StmtAssign stmtAssign) = codeGenStmtAssign stmtAssign
-codeGenStmt _                           = undefined
+codeGenStmt (Ast.StmtAssign stmtAssign) = return $ Cfg.empty defaultLoc
+codeGenStmt _                           = return $ Cfg.empty defaultLoc
+
+dummyTmpVar :: Bitcode.TmpVariable
+dummyTmpVar = Bitcode.TmpVariable Fqn.nativeInt defaultLoc
+
+dummyActualType :: ActualType
+dummyActualType = ActualType.int
 
 -- | A simple dispatcher for code gen expressions
 -- see `codeGenExp<TheExpressionsKindYouWantToInspect>`
 codeGenExp :: Ast.Exp -> CodeGenState -> (Cfg, Bitcode.TmpVariable, ActualType)
 codeGenExp (Ast.ExpInt   expInt  ) _ = codeGenExpInt expInt
 codeGenExp (Ast.ExpStr   expStr  ) _ = codeGenExpStr expStr
-codeGenExp (Ast.ExpVar   expVar  ) s = undefined
-codeGenExp (Ast.ExpCall  expCall ) s = undefined
-codeGenExp _ _                       = undefined
+codeGenExp (Ast.ExpVar   expVar  ) s = (Cfg.empty defaultLoc, dummyTmpVar, dummyActualType)
+codeGenExp (Ast.ExpCall  expCall ) s = (Cfg.empty defaultLoc, dummyTmpVar, dummyActualType)
+codeGenExp _ _                       = (Cfg.empty defaultLoc, dummyTmpVar, dummyActualType)
 
 -- | during stmt assign, it could be the case that
 -- a simple variable is also defined. if so, we need
