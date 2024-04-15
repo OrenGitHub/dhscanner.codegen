@@ -90,11 +90,25 @@ dummyActualType = ActualType.int
 -- | A simple dispatcher for code gen expressions
 -- see `codeGenExp<TheExpressionsKindYouWantToInspect>`
 codeGenExp :: Ast.Exp -> CodeGenState -> (Cfg, Bitcode.TmpVariable, ActualType)
-codeGenExp (Ast.ExpInt   expInt  ) _ = codeGenExpInt expInt
-codeGenExp (Ast.ExpStr   expStr  ) _ = codeGenExpStr expStr
-codeGenExp (Ast.ExpVar   expVar  ) s = (Cfg.empty defaultLoc, dummyTmpVar, dummyActualType)
-codeGenExp (Ast.ExpCall  expCall ) s = (Cfg.empty defaultLoc, dummyTmpVar, dummyActualType)
-codeGenExp _ _                       = (Cfg.empty defaultLoc, dummyTmpVar, dummyActualType)
+codeGenExp (Ast.ExpInt   expInt  )  _  = codeGenExpInt expInt
+codeGenExp (Ast.ExpStr   expStr  )  _  = codeGenExpStr expStr
+codeGenExp (Ast.ExpVar   expVar  ) ctx = (Cfg.empty defaultLoc, dummyTmpVar, dummyActualType)
+codeGenExp (Ast.ExpCall  expCall ) ctx = codeGenExpCall expCall ctx
+codeGenExp _ _                         = (Cfg.empty defaultLoc, dummyTmpVar, dummyActualType)
+
+codeGenExps :: [ Ast.Exp ] -> CodeGenState -> ([ Cfg ], [ Bitcode.TmpVariable ], [ ActualType ])
+codeGenExps exps ctx = ([], [], [])
+
+codeGenExpCall :: Ast.ExpCallContent -> CodeGenState -> (Cfg, Bitcode.TmpVariable, ActualType)
+codeGenExpCall callExp ctx = let
+    (cfg, calleeTmpVariable, actualType) = codeGenExp (Ast.callee callExp) ctx
+    (cfgs, argsTmpVariables, actualTypes) = codeGenExps (Ast.args callExp) ctx
+    output = Bitcode.TmpVariable Fqn.nativeInt defaultLoc
+    callInstruction = Bitcode.Call $ Bitcode.CallContent output calleeTmpVariable argsTmpVariables
+    instruction = Bitcode.Instruction defaultLoc callInstruction
+    prepareCall = foldl' Cfg.concat cfg cfgs
+    actualCall = Cfg.atom (Node instruction)
+    in (prepareCall `Cfg.concat` actualCall, output, dummyActualType)
 
 -- | during stmt assign, it could be the case that
 -- a simple variable is also defined. if so, we need
