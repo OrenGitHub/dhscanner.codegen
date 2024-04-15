@@ -17,7 +17,7 @@ import CodeGen ( codeGen )
 data App = App
 
 mkYesod "App" [parseRoutes|
-/ HomeR POST
+/codegen HomeR POST
 |]
 
 instance Yesod App

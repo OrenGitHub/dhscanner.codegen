@@ -69,7 +69,7 @@ insertVar name v t = insert (Token.getVarNameToken name) v t
 
 lookupActualType :: Token.Named -> SymbolTable -> ActualType
 lookupActualType name table = case lookup' (Token.content name) (scopes table) of
-    Nothing -> NativeType $ NativeTypeAny
+    Nothing -> ActualType.Any
     Just variable -> (actualType variable)
 
 lookupBitcodeVar :: Token.Named -> SymbolTable -> Maybe Bitcode.Variable

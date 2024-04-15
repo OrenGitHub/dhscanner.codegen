@@ -19,27 +19,29 @@ import GHC.Generics
 import qualified Data.Map
 
 data ActualType
-   = Class ClassContent
+   = Any
+   | Require -- ^ for javascript
+   | NativeTypeInt
+   | NativeTypeStr
+   | NativeTypeBool
+   | NativeTypeConstInt Int
+   | NativeTypeConstStr String
+   | NativeTypeConstBool
+   | Class ClassContent
    | Method MethodContent
    | Package PackageContent
    | Function FunctionContent
-   | NativeType NativeTypeContent
    | ThirdPartyImport ThirdPartyImportContent
-   deriving ( Show, Eq, Ord, Generic, ToJSON, FromJSON )
+   deriving ( Show, Eq, Ord, Generic )
 
-data Classes
-   = Classes
-     {
-         actualClasses :: Map String ClassContent
-     }
-     deriving ( Show, Eq, Ord, Generic, ToJSON, FromJSON )
+data Classes = Classes { actualClasses :: Map String ClassContent } deriving ( Show )
 
 data Functions
    = Functions
      {
          actualFunctions :: Map String ClassContent
      }
-     deriving ( Show, Eq, Ord, Generic, ToJSON, FromJSON )
+     deriving ( Show, Eq, Ord )
 
 -- addMethod :: Ast.DecMethodContent -> Ast.DecClassContent -> Classes -> Classes
 -- addMethod m c classes = Classes { actualClasses = actualClasses' }
@@ -51,14 +53,14 @@ data Super
      {
          actualSuper :: ClassContent
      }
-     deriving ( Show, Eq, Ord, Generic, ToJSON, FromJSON )
+     deriving ( Show, Eq, Ord, Generic )
 
 data Supers
    = Supers
      {
          actualSupers :: Set Super
      }
-     deriving ( Show, Eq, Ord, Generic, ToJSON, FromJSON )
+     deriving ( Show, Eq, Ord, Generic )
 
 data DataMember
    = DataMember
@@ -66,14 +68,14 @@ data DataMember
          dataMemberName :: Token.MembrName,
          dataMemberType :: ActualType
      }
-     deriving ( Show, Eq, Ord, Generic, ToJSON, FromJSON )
+     deriving ( Show, Eq, Ord, Generic )
 
 data DataMembers
    = DataMembers
      {
          actualDataMembers :: Set DataMember
      }
-     deriving ( Show, Eq, Ord, Generic, ToJSON, FromJSON )
+     deriving ( Show, Eq, Ord, Generic )
 
 data ClassContent
    = ClassContent
@@ -83,21 +85,21 @@ data ClassContent
          methods :: Methods,
          dataMembers :: DataMembers
      }
-     deriving ( Show, Eq, Ord, Generic, ToJSON, FromJSON )
+     deriving ( Show, Eq, Ord, Generic )
 
 data Methods
    = Methods
      {
          actualMethods :: Map String MethodContent
      }
-     deriving ( Show, Eq, Ord, Generic, ToJSON, FromJSON )
+     deriving ( Show, Eq, Ord, Generic )
 
 data Params
    = Params
      {
          actualParams :: [ Param ]
      }
-     deriving ( Show, Eq, Ord, Generic, ToJSON, FromJSON )
+     deriving ( Show, Eq, Ord, Generic )
 
 data Param
    = Param
@@ -106,25 +108,16 @@ data Param
          paramSerialIdx :: Int,
          paramActualTypeHashed :: String
      }
-     deriving ( Show, Eq, Ord, Generic, ToJSON, FromJSON )
-
-nativeTypeInt = NativeType NativeTypeInt
-nativeTypeStr = NativeType NativeTypeStr
-
-data NativeTypeContent
-   = NativeTypeInt
-   | NativeTypeStr
-   | NativeTypeAny
-   | NativeTypeBool
-   deriving ( Show, Eq, Ord, Generic, ToJSON, FromJSON )
+     deriving ( Show, Eq, Ord, Generic )
 
 data FunctionContent
    = FunctionContent
      {
          funcName :: Token.FuncName,
-         params :: Params
+         params :: Params,
+         returnType :: ActualType
      }
-     deriving ( Show, Eq, Ord, Generic, ToJSON, FromJSON )
+     deriving ( Show, Eq, Ord )
 
 data MethodContent
    = MethodContent
@@ -132,16 +125,17 @@ data MethodContent
          methodName :: Token.MethdName,
          methodParams :: Params
      }
-     deriving ( Show, Eq, Ord, Generic, ToJSON, FromJSON )
+     deriving ( Show, Eq, Ord, Generic )
 
 data ThirdPartyImportContent
    = ThirdPartyImportContent
      {
+         thirdPartyImportedName :: String
      }
-     deriving ( Show, Eq, Ord, Generic, ToJSON, FromJSON )
+     deriving ( Show, Eq, Ord, Generic )
 
 data PackageContent
    = PackageContent
      {
      }
-     deriving ( Show, Eq, Ord, Generic, ToJSON, FromJSON )
+     deriving ( Show, Eq, Ord, Generic )
