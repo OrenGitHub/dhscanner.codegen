@@ -3,6 +3,8 @@ module SymbolTable
 where
 
 -- project imports
+import Fqn
+import Location
 import ActualType
 import qualified Token
 import qualified Bitcode
@@ -16,17 +18,13 @@ import Data.Maybe
 import qualified Data.Map
 
 -- | an /internal/ data type to accommodate
--- a variables's actual type, fqn, and bitcode temporary
-data Variable
-   = Variable
-     {
-         actualType :: ActualType,
-         bitcodeVar :: Bitcode.Variable
-     }
-     deriving ( Show )
-
--- | Unexposed wrapper around Data.Map
-data Scope = Scope { actualScope :: Map String Variable } deriving ( Show )
+-- a variables's metadata. Note that the actual
+-- is deliberately separated from the bitcode var
+-- since it is needed only during codegen time, and
+-- not needed in later phases: neither for abstract interpretation,
+-- nor for knowledge base construction
+-- Unexposed wrapper around Data.Map
+data Scope = Scope { actualScope :: Map String (Bitcode.Variable,ActualType) } deriving ( Show )
 
 -- |
 -- * A stack-like data structure to manage scopes while traversing the AST
@@ -49,13 +47,23 @@ beginScope = SymbolTable . (newEmptyScope:) . scopes
 endScope :: SymbolTable -> SymbolTable
 endScope = SymbolTable . tail . scopes
 
-emptySymbolTable = SymbolTable { scopes = [] }
+runtimeScope :: Scope
+runtimeScope = let
+    location = Location "nodejs" 0 0 0 0 -- native nodejs function
+    varName = Token.VarName (Token.Named "require" location)
+    requireSpecialVar = Bitcode.SrcVariableCtor $ Bitcode.SrcVariable (Fqn "nodejs.require") varName
+    in Scope $ Data.Map.fromList [("require",(requireSpecialVar,ActualType.Require))] 
+
+emptySymbolTable :: SymbolTable
+emptySymbolTable = SymbolTable { scopes = [runtimeScope] }
+
+insert' :: String -> Bitcode.Variable -> ActualType -> Scope -> Scope
+insert' content b t (Scope s) = Scope $ Data.Map.insert content (b,t) s
 
 insert :: Token.Named -> Bitcode.Variable -> ActualType -> SymbolTable -> SymbolTable
-insert name bitcodeVar actualType symbolTable = let
-    currentScope = actualScope (head (scopes symbolTable))
-    currentScope' = Scope $ Data.Map.insert (Token.content name) (Variable actualType bitcodeVar) currentScope
-    in SymbolTable { scopes = currentScope' : (tail (scopes symbolTable)) }
+insert _ _ _ (SymbolTable []) = SymbolTable [] -- unreachable
+insert name bitcodeVar actualType (SymbolTable (scope:externalScopes)) = SymbolTable scopes
+    where scopes = (insert' (Token.content name) bitcodeVar actualType scope):externalScopes
 
 varExists' :: String -> [ Scope ] -> Bool
 varExists' s scopes = isJust (lookup' s scopes)
@@ -67,22 +75,19 @@ varExists v table = varExists' (Token.content (Token.getVarNameToken v)) (scopes
 insertVar:: Token.VarName -> Bitcode.Variable -> ActualType -> SymbolTable -> SymbolTable
 insertVar name v t = insert (Token.getVarNameToken name) v t
 
-lookupActualType :: Token.Named -> SymbolTable -> ActualType
-lookupActualType name table = case lookup' (Token.content name) (scopes table) of
-    Nothing -> ActualType.Any
-    Just variable -> (actualType variable)
+lookupVar :: Token.VarName -> SymbolTable -> Maybe (Bitcode.Variable, ActualType)
+lookupVar v table = lookup' (Token.content $ Token.getVarNameToken v) (scopes table)
 
-lookupBitcodeVar :: Token.Named -> SymbolTable -> Maybe Bitcode.Variable
-lookupBitcodeVar name table = case lookup' (Token.content name) (scopes table) of
+lookupNominalType :: Token.NominalTy -> SymbolTable -> Maybe ActualType
+lookupNominalType t table = case lookup' (Token.content $ Token.getNominalTyToken t) (scopes table) of
     Nothing -> Nothing
-    Just v -> Just (bitcodeVar v)
-
+    Just (_, actualType) -> Just actualType
 
 -- Internal (recursive) lookup
 -- The scopes list starts with the /innermost/ scope
-lookup' :: String -> [ Scope ] -> Maybe Variable
+lookup' :: String -> [ Scope ] -> Maybe (Bitcode.Variable, ActualType)
 lookup' _ [] = Nothing
-lookup' name (scope:outerScopes) = case Data.Map.lookup name (actualScope scope) of
+lookup' name ((Scope scope):outerScopes) = case Data.Map.lookup name scope of
     Nothing -> lookup' name outerScopes
     Just variable -> Just variable
 

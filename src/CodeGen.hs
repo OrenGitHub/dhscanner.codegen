@@ -48,7 +48,7 @@ data GeneratedExp
    = GeneratedExp
      {
          generatedCfg :: Cfg,
-         generatedValue :: Bitcode.TmpVariable,
+         generatedValue :: Bitcode.Variable,
          inferredActualType :: ActualType
      }
      deriving ( Show )
@@ -95,19 +95,53 @@ codeGenStmt (Ast.StmtDecvar stmtDecVar) = codeGenStmtDecvar stmtDecVar
 codeGenStmt (Ast.StmtAssign stmtAssign) = return $ Cfg.empty defaultLoc
 codeGenStmt _                           = return $ Cfg.empty defaultLoc
 
-dummyTmpVar :: Bitcode.TmpVariable
-dummyTmpVar = Bitcode.TmpVariable Fqn.nativeInt defaultLoc
+dummyTmpVar :: Bitcode.Variable
+dummyTmpVar = Bitcode.TmpVariableCtor $ Bitcode.TmpVariable Fqn.nativeInt defaultLoc
 
 dummyActualType :: ActualType
 dummyActualType = ActualType.Any
 
 -- | dispatch codegen exp handlers
 codeGenExp :: Ast.Exp -> CodeGenState -> GeneratedExp
-codeGenExp (Ast.ExpInt   expInt  )  _  = codeGenExpInt expInt
-codeGenExp (Ast.ExpStr   expStr  )  _  = codeGenExpStr expStr
-codeGenExp (Ast.ExpVar   expVar  ) ctx = GeneratedExp (Cfg.empty defaultLoc) dummyTmpVar dummyActualType
+codeGenExp (Ast.ExpInt   expInt  )  _  = codeGenExpInt expInt -- ctx not needed
+codeGenExp (Ast.ExpStr   expStr  )  _  = codeGenExpStr expStr -- ctx not needed
+codeGenExp (Ast.ExpVar   expVar  ) ctx = codeGenExpVar expVar ctx
 codeGenExp (Ast.ExpCall  expCall ) ctx = codeGenExpCall expCall ctx
 codeGenExp _ _                         = GeneratedExp (Cfg.empty defaultLoc) dummyTmpVar dummyActualType
+
+-- | whenever something goes wrong, or simply not supported
+-- we can generate a non deterministic expression
+nondet :: Location -> GeneratedExp
+nondet location = let
+    nondetFunc = Token.VarName (Token.Named "nondet" location)
+    arbitraryValue = Token.VarName (Token.Named "arbitrary_value" location)
+    callee = Bitcode.SrcVariableCtor $ Bitcode.SrcVariable Fqn.any nondetFunc
+    output = Bitcode.SrcVariableCtor $ Bitcode.SrcVariable Fqn.any arbitraryValue
+    call = Bitcode.Call (Bitcode.CallContent output callee [])
+    instruction = Bitcode.Instruction location call
+    cfg = Cfg.atom (Cfg.Node instruction)
+    in GeneratedExp cfg output ActualType.Any 
+
+-- | for some reason, the variable needed to generate an exp
+-- does not exist in the symbol table. this is (probably? surely?) an error.
+-- best thing we can do is use some universal variable to capture all
+-- the missing variables
+codeGenExpVarSimpleMissing :: Location -> GeneratedExp
+codeGenExpVarSimpleMissing = nondet
+
+codeGenExpVarSimpleExisting :: Token.VarName -> Bitcode.Variable -> ActualType -> GeneratedExp
+codeGenExpVarSimpleExisting v b t = GeneratedExp (Cfg.empty (Token.getVarNameLocation v)) b t 
+
+codeGenExpVarSimple :: Ast.VarSimpleContent -> CodeGenState -> GeneratedExp
+codeGenExpVarSimple v ctx = case SymbolTable.lookupVar (Ast.varName v) (symbolTable ctx) of
+    Nothing -> codeGenExpVarSimpleMissing (Token.getVarNameLocation (Ast.varName v))
+    Just (bitcodeVar, actualType) -> codeGenExpVarSimpleExisting (Ast.varName v) bitcodeVar actualType
+
+-- | dispatch codegen (exp) var handlers
+codeGenExpVar :: Ast.ExpVarContent -> CodeGenState -> GeneratedExp
+codeGenExpVar (Ast.ExpVarContent (Ast.VarSimple    v)) ctx = codeGenExpVarSimple    v ctx
+codeGenExpVar (Ast.ExpVarContent (Ast.VarField     v)) ctx = undefined -- codeGenExpVarField     v ctx
+codeGenExpVar (Ast.ExpVarContent (Ast.VarSubscript v i)) ctx = undefined -- codeGenExpVarSubscript v ctx
 
 -- | code gen exps ( plural )
 codeGenExps :: [ Ast.Exp ] -> CodeGenState -> [ GeneratedExp ] 
@@ -118,7 +152,7 @@ thirdPartyContent = ActualType.ThirdPartyImport . ActualType.ThirdPartyImportCon
 
 -- | handle special javascript call: `require`
 getReturnActualType' :: Args -> ActualType
-getReturnActualType' [(GeneratedExp _ _ (NativeTypeConstStr value))] = thirdPartyContent value
+getReturnActualType' [(GeneratedExp _ _ (NativeTypeConstStr value))] = thirdPartyContent ("npm." ++ value)
 getReturnActualType' _ = ActualType.Any
 
 -- | normal case currently ignores overloading
@@ -131,20 +165,19 @@ getReturnActualType :: Callee -> Args -> ActualType
 getReturnActualType (GeneratedExp _ _ ActualType.Require) args = getReturnActualType' args
 getReturnActualType callee _ = getReturnActualType'' callee
 
-buildTheActualCall' :: Callee -> Args -> Bitcode.TmpVariable -> Bitcode.CallContent
+buildTheActualCall' :: Callee -> Args -> Bitcode.Variable -> Bitcode.CallContent
 buildTheActualCall' callee args output = let
     callee' = generatedValue callee
     args' = Data.List.map generatedValue args
     in Bitcode.CallContent output callee' args'
 
-buildTheActualCall :: Callee -> Args -> Bitcode.TmpVariable -> Cfg
-buildTheActualCall c a b = Cfg.atom $ Cfg.Node $ (Bitcode.Instruction defaultLoc) $ Bitcode.Call (buildTheActualCall' c a b)
--- buildTheActualCall c a b = Cfg.atom . Node . Bitcode.Instruction . Bitcode.Call . buildTheActualCall' c a b
+buildTheActualCall :: Callee -> Args -> Bitcode.Variable -> Cfg
+buildTheActualCall c a t = Cfg.atom $ Cfg.Node $ (Bitcode.Instruction defaultLoc) $ Bitcode.Call $ buildTheActualCall' c a t
 
 codeGenExpCall' :: Callee -> Args -> Location -> GeneratedExp
 codeGenExpCall' callee args location = let
     returnType = getReturnActualType callee args
-    output = Bitcode.TmpVariable (Fqn.fromActualType returnType) location
+    output = Bitcode.TmpVariableCtor $ Bitcode.TmpVariable (Fqn.fromActualType returnType) location
     actualCall = buildTheActualCall callee args output
     prepareCall = foldl' Cfg.concat (generatedCfg callee) (Data.List.map generatedCfg args)
     in GeneratedExp (prepareCall `Cfg.concat` actualCall) output returnType
@@ -178,8 +211,8 @@ codeGenStmtAssignToSimpleVar astSimpleVar init = do {
         init' = codeGenExp init ctx;
         varName = Ast.varName astSimpleVar;
         location = Token.getVarNameLocation varName;
-        dst = SymbolTable.lookupBitcodeVar (Token.getVarNameToken varName) (symbolTable ctx);
-        output = case dst of { Nothing -> Bitcode.TmpVariableCtor (generatedValue init'); Just dst' -> dst' }
+        dst = SymbolTable.lookupVar varName (symbolTable ctx);
+        output = case dst of { Nothing -> generatedValue init'; Just dst' -> fst dst' }
         content = Bitcode.AssignContent output (generatedValue init');
         instruction = Bitcode.Instruction location $ Bitcode.Assign content;
         in Cfg.concat (generatedCfg init') (Cfg.atom $ Node instruction)
@@ -245,11 +278,11 @@ codeGenDecVarInit varName nominalType init = do
 codeGenDecVarNoInit' :: Ast.DecVarContent -> CodeGenState -> CodeGenState
 codeGenDecVarNoInit' decVar ctx = let
     varName = Ast.decVarName decVar
-    tokenName = Token.getVarNameToken varName
-    nominalType = Token.getNominalTyToken (Ast.decVarNominalType decVar)
-    bitcodeVar = Bitcode.SrcVariableCtor $ Bitcode.SrcVariable Fqn.nativeInt varName
-    actualType = SymbolTable.lookupActualType nominalType (symbolTable ctx)
-    symbolTable' = SymbolTable.insert tokenName bitcodeVar actualType (symbolTable ctx)
+    nominalType = Ast.decVarNominalType decVar
+    actualType = SymbolTable.lookupNominalType nominalType (symbolTable ctx)
+    actualType' = case actualType of { Nothing -> ActualType.Any; Just t -> t }
+    bitcodeVar = Bitcode.SrcVariableCtor $ Bitcode.SrcVariable (Fqn.fromActualType actualType') varName
+    symbolTable' = SymbolTable.insertVar varName bitcodeVar actualType' (symbolTable ctx)
     in ctx { symbolTable = symbolTable' }
 
 -- | Non monadic helper function for updating the symbol table
@@ -263,7 +296,7 @@ codeGenDecVarInit' varName initValue ctx = let
     in ctx { symbolTable = symbolTable' }
 
 -- | Non monadic helper function for creating the cfg of the init value
-codeGenDecVarInit'' :: Token.VarName -> Fqn -> (Cfg, Bitcode.TmpVariable) -> Cfg
+codeGenDecVarInit'' :: Token.VarName -> Fqn -> (Cfg, Bitcode.Variable) -> Cfg
 codeGenDecVarInit'' varName fqn (cfg, tmpVariable) = let
     srcVariable = Bitcode.SrcVariableCtor $ Bitcode.SrcVariable fqn varName
     assignContent = Bitcode.AssignContent { assignOutput = srcVariable, assignInput = tmpVariable }
@@ -278,10 +311,11 @@ codeGenExpInt expInt = let
     constIntValue = Token.constIntValue constInt
     location = Token.constIntLocation constInt
     tmpVariable = Bitcode.TmpVariable Fqn.nativeInt location
+    variable = Bitcode.TmpVariableCtor tmpVariable
     loadImmInt = Bitcode.LoadImmContentInt tmpVariable constInt
     instruction = Bitcode.Instruction location $ Bitcode.LoadImm loadImmInt
     actualType = ActualType.NativeTypeConstInt constIntValue
-    in GeneratedExp (Cfg.atom $ Node instruction) tmpVariable actualType
+    in GeneratedExp (Cfg.atom $ Node instruction) variable actualType
 
 codeGenExpStr :: Ast.ExpStrContent -> GeneratedExp
 codeGenExpStr expStr = let
@@ -289,10 +323,11 @@ codeGenExpStr expStr = let
     constStrValue = Token.constStrValue constStr
     location = Token.constStrLocation constStr
     tmpVariable = Bitcode.TmpVariable Fqn.nativeStr location
+    variable = Bitcode.TmpVariableCtor tmpVariable
     loadImmStr = Bitcode.LoadImmContentStr tmpVariable (Token.constStrValue constStr)
     instruction = Bitcode.Instruction location $ Bitcode.LoadImm loadImmStr
     actualType = ActualType.NativeTypeConstStr constStrValue
-    in GeneratedExp (Cfg.atom $ Node instruction) tmpVariable actualType
+    in GeneratedExp (Cfg.atom $ Node instruction) variable actualType
 
 -- | Temporarily
 defaultLoc :: Location
