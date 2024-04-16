@@ -9,3 +9,5 @@ RUN echo "set incsearch" >> ~/.vimrc
 RUN echo "syntax on" >> ~/.vimrc
 WORKDIR /codegen
 COPY . .
+RUN cabal build
+CMD ["cabal", "run"]
