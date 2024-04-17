@@ -90,7 +90,7 @@ codeGenStmts' = mapM codeGenStmt
 -- see `codeGenStmt<TheStatementKindYouWantToInspect>`
 codeGenStmt :: Ast.Stmt -> CodeGenContext Cfg
 codeGenStmt (Ast.StmtIf     stmtIf    ) = return $ Cfg.empty defaultLoc
-codeGenStmt (Ast.StmtCall   stmtCall  ) = return $ Cfg.empty defaultLoc
+codeGenStmt (Ast.StmtCall   stmtCall  ) = codeGenStmtCall stmtCall
 codeGenStmt (Ast.StmtDecvar stmtDecVar) = codeGenStmtDecvar stmtDecVar
 codeGenStmt (Ast.StmtAssign stmtAssign) = return $ Cfg.empty defaultLoc
 codeGenStmt _                           = return $ Cfg.empty defaultLoc
@@ -100,6 +100,12 @@ dummyTmpVar = Bitcode.TmpVariableCtor $ Bitcode.TmpVariable Fqn.nativeInt defaul
 
 dummyActualType :: ActualType
 dummyActualType = ActualType.Any
+
+-- | in fact, stmt call only wraps an expression call,
+-- whose value doesn't get assigned anywhere ... it's really
+-- all about wrapping the call to codeGenExpCall ...
+codeGenStmtCall :: Ast.ExpCallContent -> CodeGenContext Cfg
+codeGenStmtCall call = do { ctx <- get; return $ generatedCfg (codeGenExpCall call ctx) }
 
 -- | dispatch codegen exp handlers
 codeGenExp :: Ast.Exp -> CodeGenState -> GeneratedExp
@@ -146,10 +152,11 @@ codeGenExpVarField v ctx = let
     outputFqn = Fqn ((Fqn.content inputFqn) ++ "." ++ fieldNameContent)
     location = Token.getFieldNameLocation fieldName
     input = Bitcode.TmpVariableCtor (Bitcode.TmpVariable inputFqn location)
-    output = Bitcode.TmpVariableCtor (Bitcode.TmpVariable outputFqn location)
+    locationOutput = Ast.varFieldLocation v
+    output = Bitcode.TmpVariableCtor (Bitcode.TmpVariable outputFqn locationOutput)
     fieldReadContent = Bitcode.FieldReadContent output input fieldName
     fieldRead = Bitcode.FieldRead fieldReadContent
-    cfg = Cfg.atom (Cfg.Node (Bitcode.Instruction location fieldRead))
+    cfg = Cfg.atom (Cfg.Node (Bitcode.Instruction locationOutput fieldRead))
     in GeneratedExp cfg output ActualType.Any
 
 -- | dispatch codegen (exp) var handlers
