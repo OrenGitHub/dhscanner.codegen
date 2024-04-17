@@ -137,10 +137,25 @@ codeGenExpVarSimple v ctx = case SymbolTable.lookupVar (Ast.varName v) (symbolTa
     Nothing -> codeGenExpVarSimpleMissing (Token.getVarNameLocation (Ast.varName v))
     Just (bitcodeVar, actualType) -> codeGenExpVarSimpleExisting (Ast.varName v) bitcodeVar actualType
 
+codeGenExpVarField :: Ast.VarFieldContent -> CodeGenState -> GeneratedExp
+codeGenExpVarField v ctx = let
+    v' = codeGenExp (Ast.ExpVar (Ast.varFieldLhs v)) ctx
+    fieldName = Ast.varFieldName v
+    inputFqn = Bitcode.variableFqn (generatedValue v')
+    fieldNameContent = Token.content (Token.getFieldNameToken fieldName)
+    outputFqn = Fqn ((Fqn.content inputFqn) ++ "." ++ fieldNameContent)
+    location = Token.getFieldNameLocation fieldName
+    input = Bitcode.TmpVariableCtor (Bitcode.TmpVariable inputFqn location)
+    output = Bitcode.TmpVariableCtor (Bitcode.TmpVariable outputFqn location)
+    fieldReadContent = Bitcode.FieldReadContent output input fieldName
+    fieldRead = Bitcode.FieldRead fieldReadContent
+    cfg = Cfg.atom (Cfg.Node (Bitcode.Instruction location fieldRead))
+    in GeneratedExp cfg output ActualType.Any
+
 -- | dispatch codegen (exp) var handlers
 codeGenExpVar :: Ast.ExpVarContent -> CodeGenState -> GeneratedExp
 codeGenExpVar (Ast.ExpVarContent (Ast.VarSimple    v)) ctx = codeGenExpVarSimple    v ctx
-codeGenExpVar (Ast.ExpVarContent (Ast.VarField     v)) ctx = undefined -- codeGenExpVarField     v ctx
+codeGenExpVar (Ast.ExpVarContent (Ast.VarField     v)) ctx = codeGenExpVarField     v ctx
 codeGenExpVar (Ast.ExpVarContent (Ast.VarSubscript v i)) ctx = undefined -- codeGenExpVarSubscript v ctx
 
 -- | code gen exps ( plural )
@@ -312,8 +327,8 @@ codeGenExpInt expInt = let
     location = Token.constIntLocation constInt
     tmpVariable = Bitcode.TmpVariable Fqn.nativeInt location
     variable = Bitcode.TmpVariableCtor tmpVariable
-    loadImmInt = Bitcode.LoadImmContentInt tmpVariable constInt
-    instruction = Bitcode.Instruction location $ Bitcode.LoadImm loadImmInt
+    loadImmInt = Bitcode.IntContent tmpVariable constInt
+    instruction = Bitcode.Instruction location $ Bitcode.LoadImmInt loadImmInt
     actualType = ActualType.NativeTypeConstInt constIntValue
     in GeneratedExp (Cfg.atom $ Node instruction) variable actualType
 
@@ -324,8 +339,8 @@ codeGenExpStr expStr = let
     location = Token.constStrLocation constStr
     tmpVariable = Bitcode.TmpVariable Fqn.nativeStr location
     variable = Bitcode.TmpVariableCtor tmpVariable
-    loadImmStr = Bitcode.LoadImmContentStr tmpVariable (Token.constStrValue constStr)
-    instruction = Bitcode.Instruction location $ Bitcode.LoadImm loadImmStr
+    loadImmStr = Bitcode.StrContent tmpVariable constStr
+    instruction = Bitcode.Instruction location $ Bitcode.LoadImmStr loadImmStr
     actualType = ActualType.NativeTypeConstStr constStrValue
     in GeneratedExp (Cfg.atom $ Node instruction) variable actualType
 
