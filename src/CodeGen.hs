@@ -150,8 +150,8 @@ codeGenExpVarField v ctx = let
     inputFqn = Bitcode.variableFqn (generatedValue v')
     fieldNameContent = Token.content (Token.getFieldNameToken fieldName)
     outputFqn = Fqn ((Fqn.content inputFqn) ++ "." ++ fieldNameContent)
-    location = Token.getFieldNameLocation fieldName
-    input = Bitcode.TmpVariableCtor (Bitcode.TmpVariable inputFqn location)
+    locationInput = Ast.locationVar (Ast.actualExpVar (Ast.varFieldLhs v))
+    input = Bitcode.TmpVariableCtor (Bitcode.TmpVariable inputFqn locationInput)
     locationOutput = Ast.varFieldLocation v
     output = Bitcode.TmpVariableCtor (Bitcode.TmpVariable outputFqn locationOutput)
     fieldReadContent = Bitcode.FieldReadContent output input fieldName
@@ -163,7 +163,7 @@ codeGenExpVarField v ctx = let
 codeGenExpVar :: Ast.ExpVarContent -> CodeGenState -> GeneratedExp
 codeGenExpVar (Ast.ExpVarContent (Ast.VarSimple    v)) ctx = codeGenExpVarSimple    v ctx
 codeGenExpVar (Ast.ExpVarContent (Ast.VarField     v)) ctx = codeGenExpVarField     v ctx
-codeGenExpVar (Ast.ExpVarContent (Ast.VarSubscript v i)) ctx = undefined -- codeGenExpVarSubscript v ctx
+codeGenExpVar (Ast.ExpVarContent (Ast.VarSubscript v)) ctx = undefined -- codeGenExpVarSubscript v ctx
 
 -- | code gen exps ( plural )
 codeGenExps :: [ Ast.Exp ] -> CodeGenState -> [ GeneratedExp ] 
