@@ -105,15 +105,24 @@ dummyActualType = ActualType.Any
 -- whose value doesn't get assigned anywhere ... it's really
 -- all about wrapping the call to codeGenExpCall ...
 codeGenStmtCall :: Ast.ExpCallContent -> CodeGenContext Cfg
-codeGenStmtCall call = do { ctx <- get; return $ generatedCfg (codeGenExpCall call ctx) }
+codeGenStmtCall call = do { call' <- codeGenExpCall call; return $ generatedCfg call' }
 
 -- | dispatch codegen exp handlers
-codeGenExp :: Ast.Exp -> CodeGenState -> GeneratedExp
-codeGenExp (Ast.ExpInt   expInt  )  _  = codeGenExpInt expInt -- ctx not needed
-codeGenExp (Ast.ExpStr   expStr  )  _  = codeGenExpStr expStr -- ctx not needed
-codeGenExp (Ast.ExpVar   expVar  ) ctx = codeGenExpVar expVar ctx
-codeGenExp (Ast.ExpCall  expCall ) ctx = codeGenExpCall expCall ctx
-codeGenExp _ _                         = GeneratedExp (Cfg.empty defaultLoc) dummyTmpVar dummyActualType
+codeGenExp :: Ast.Exp -> CodeGenContext GeneratedExp
+codeGenExp (Ast.ExpInt    expInt    ) = return $ codeGenExpInt expInt -- ctx not needed
+codeGenExp (Ast.ExpStr    expStr    ) = return $ codeGenExpStr expStr -- ctx not needed
+codeGenExp (Ast.ExpVar    expVar    ) = codeGenExpVar expVar
+codeGenExp (Ast.ExpCall   expCall   ) = codeGenExpCall expCall
+codeGenExp (Ast.ExpLambda expLambda ) = codeGenExpLambda expLambda -- truly monadic function
+codeGenExp _                          = return $ GeneratedExp (Cfg.empty defaultLoc) dummyTmpVar dummyActualType
+
+codeGenExpLambda :: Ast.ExpLambdaContent -> CodeGenContext GeneratedExp
+codeGenExpLambda expLambda = return $ GeneratedExp (Cfg.empty defaultLoc) dummyTmpVar dummyActualType
+    -- symbolTable' = insertParams (Ast.expLambdaParams expLambda) (symbolTable ctx)
+    -- cfgs = evalState (codeGenStmts (Ast.expLambdaBody expLambda)) ctx { symbolTable = symbolTable' }
+    
+    
+    
 
 -- | whenever something goes wrong, or simply not supported
 -- we can generate a non deterministic expression
@@ -143,31 +152,31 @@ codeGenExpVarSimple v ctx = case SymbolTable.lookupVar (Ast.varName v) (symbolTa
     Nothing -> codeGenExpVarSimpleMissing (Token.getVarNameLocation (Ast.varName v))
     Just (bitcodeVar, actualType) -> codeGenExpVarSimpleExisting (Ast.varName v) bitcodeVar actualType
 
-codeGenExpVarField :: Ast.VarFieldContent -> CodeGenState -> GeneratedExp
-codeGenExpVarField v ctx = let
-    v' = codeGenExp (Ast.ExpVar (Ast.varFieldLhs v)) ctx
-    fieldName = Ast.varFieldName v
-    inputFqn = Bitcode.variableFqn (generatedValue v')
-    fieldNameContent = Token.content (Token.getFieldNameToken fieldName)
-    outputFqn = Fqn ((Fqn.content inputFqn) ++ "." ++ fieldNameContent)
-    locationInput = Ast.locationVar (Ast.actualExpVar (Ast.varFieldLhs v))
-    input = Bitcode.TmpVariableCtor (Bitcode.TmpVariable inputFqn locationInput)
-    locationOutput = Ast.varFieldLocation v
-    output = Bitcode.TmpVariableCtor (Bitcode.TmpVariable outputFqn locationOutput)
-    fieldReadContent = Bitcode.FieldReadContent output input fieldName
-    fieldRead = Bitcode.FieldRead fieldReadContent
-    cfg = Cfg.atom (Cfg.Node (Bitcode.Instruction locationOutput fieldRead))
-    in GeneratedExp cfg output ActualType.Any
+codeGenExpVarField :: Ast.VarFieldContent -> CodeGenContext GeneratedExp
+codeGenExpVarField v = do
+    v' <- codeGenExp (Ast.ExpVar (Ast.varFieldLhs v))
+    let fieldName = Ast.varFieldName v
+    let inputFqn = Bitcode.variableFqn (generatedValue v')
+    let fieldNameContent = Token.content (Token.getFieldNameToken fieldName)
+    let outputFqn = Fqn ((Fqn.content inputFqn) ++ "." ++ fieldNameContent)
+    let locationInput = Ast.locationVar (Ast.actualExpVar (Ast.varFieldLhs v))
+    let input = Bitcode.TmpVariableCtor (Bitcode.TmpVariable inputFqn locationInput)
+    let locationOutput = Ast.varFieldLocation v
+    let output = Bitcode.TmpVariableCtor (Bitcode.TmpVariable outputFqn locationOutput)
+    let fieldReadContent = Bitcode.FieldReadContent output input fieldName
+    let fieldRead = Bitcode.FieldRead fieldReadContent
+    let cfg = Cfg.atom (Cfg.Node (Bitcode.Instruction locationOutput fieldRead))
+    return $ GeneratedExp cfg output ActualType.Any 
 
 -- | dispatch codegen (exp) var handlers
-codeGenExpVar :: Ast.ExpVarContent -> CodeGenState -> GeneratedExp
-codeGenExpVar (Ast.ExpVarContent (Ast.VarSimple    v)) ctx = codeGenExpVarSimple    v ctx
-codeGenExpVar (Ast.ExpVarContent (Ast.VarField     v)) ctx = codeGenExpVarField     v ctx
-codeGenExpVar (Ast.ExpVarContent (Ast.VarSubscript v)) ctx = undefined -- codeGenExpVarSubscript v ctx
+codeGenExpVar :: Ast.ExpVarContent -> CodeGenContext GeneratedExp
+codeGenExpVar (Ast.ExpVarContent (Ast.VarSimple    v)) = do { ctx <- get; return $ codeGenExpVarSimple v ctx }
+codeGenExpVar (Ast.ExpVarContent (Ast.VarField     v)) = codeGenExpVarField v
+codeGenExpVar (Ast.ExpVarContent (Ast.VarSubscript v)) = undefined -- codeGenExpVarSubscript v ctx
 
 -- | code gen exps ( plural )
-codeGenExps :: [ Ast.Exp ] -> CodeGenState -> [ GeneratedExp ] 
-codeGenExps exps ctx = map (\exp -> codeGenExp exp ctx) exps
+codeGenExps :: [ Ast.Exp ] -> CodeGenContext [ GeneratedExp ] 
+codeGenExps = mapM codeGenExp
 
 thirdPartyContent :: String -> ActualType
 thirdPartyContent = ActualType.ThirdPartyImport . ActualType.ThirdPartyImportContent
@@ -204,11 +213,11 @@ codeGenExpCall' callee args location = let
     prepareCall = foldl' Cfg.concat (generatedCfg callee) (Data.List.map generatedCfg args)
     in GeneratedExp (prepareCall `Cfg.concat` actualCall) output returnType
 
-codeGenExpCall :: Ast.ExpCallContent -> CodeGenState -> GeneratedExp
-codeGenExpCall call ctx = let
-    callee = codeGenExp (Ast.callee call) ctx
-    args = codeGenExps (Ast.args call) ctx
-    in codeGenExpCall' callee args (Ast.expCallLocation call)
+codeGenExpCall :: Ast.ExpCallContent -> CodeGenContext GeneratedExp
+codeGenExpCall call = do
+    callee <- codeGenExp (Ast.callee call)
+    args <- codeGenExps (Ast.args call)
+    return $ codeGenExpCall' callee args (Ast.expCallLocation call)
 
 -- | during stmt assign, it could be the case that
 -- a simple variable is also defined. if so, we need
@@ -227,18 +236,17 @@ createBitcodeVarIfNeeded v = do { ctx <- get; put $ let
 -- will insert the assigned variable to the symbol table
 -- (if it hasn't been inserted before)
 codeGenStmtAssignToSimpleVar :: Ast.VarSimpleContent -> Ast.Exp -> CodeGenContext Cfg
-codeGenStmtAssignToSimpleVar astSimpleVar init = do {
+codeGenStmtAssignToSimpleVar astSimpleVar init = do
     createBitcodeVarIfNeeded astSimpleVar;
-    ctx <- get; return $ let
-        init' = codeGenExp init ctx;
-        varName = Ast.varName astSimpleVar;
-        location = Token.getVarNameLocation varName;
-        dst = SymbolTable.lookupVar varName (symbolTable ctx);
-        output = case dst of { Nothing -> generatedValue init'; Just dst' -> fst dst' }
-        content = Bitcode.AssignContent output (generatedValue init');
-        instruction = Bitcode.Instruction location $ Bitcode.Assign content;
-        in Cfg.concat (generatedCfg init') (Cfg.atom $ Node instruction)
-}
+    init' <- codeGenExp init;
+    ctx <- get;
+    let varName = Ast.varName astSimpleVar;
+    let location = Token.getVarNameLocation varName;
+    let dst = SymbolTable.lookupVar varName (symbolTable ctx);
+    let output = case dst of { Nothing -> generatedValue init'; Just dst' -> fst dst' }
+    let content = Bitcode.AssignContent output (generatedValue init');
+    let instruction = Bitcode.Instruction location $ Bitcode.Assign content;
+    return $ Cfg.concat (generatedCfg init') (Cfg.atom $ Node instruction)
 
 codeGenStmtAssignToFieldVar :: Ast.VarFieldContent -> Ast.Exp -> CodeGenContext Cfg
 codeGenStmtAssignToFieldVar v e = undefined
@@ -276,7 +284,7 @@ codeGenStmtDecvar d = case Ast.decVarInitValue d of
 --
 -- * return an empty cfg (nop) since nothing happens (no init)
 codeGenDecVarNoInit :: Ast.DecVarContent -> Location -> CodeGenContext Cfg
-codeGenDecVarNoInit d loc = do { ctx <- get; put (codeGenDecVarNoInit' d ctx); return $ Cfg.empty loc }
+codeGenDecVarNoInit d loc = do { codeGenDecVarNoInit' d; return $ Cfg.empty loc }
 
 -- |
 -- * update the symbol table with the declared variable
@@ -289,33 +297,34 @@ codeGenDecVarNoInit d loc = do { ctx <- get; put (codeGenDecVarNoInit' d ctx); r
 --
 codeGenDecVarInit :: Token.VarName -> Token.NominalTy -> Ast.Exp -> CodeGenContext Cfg
 codeGenDecVarInit varName nominalType init = do
-    ctx <- get;
-    let init' = codeGenExp init ctx;
+    init' <- codeGenExp init;
     let fqn = Fqn.fromActualType (inferredActualType init');
-    put $ codeGenDecVarInit' varName init ctx;
+    codeGenDecVarInit' varName init;
     return $ codeGenDecVarInit'' varName fqn (generatedCfg init', generatedValue init')
 
 -- | pure non-monadic function, just update
 -- the symbol table with the declared variable
-codeGenDecVarNoInit' :: Ast.DecVarContent -> CodeGenState -> CodeGenState
-codeGenDecVarNoInit' decVar ctx = let
-    varName = Ast.decVarName decVar
-    nominalType = Ast.decVarNominalType decVar
-    actualType = SymbolTable.lookupNominalType nominalType (symbolTable ctx)
-    actualType' = case actualType of { Nothing -> ActualType.Any; Just t -> t }
-    bitcodeVar = Bitcode.SrcVariableCtor $ Bitcode.SrcVariable (Fqn.fromActualType actualType') varName
-    symbolTable' = SymbolTable.insertVar varName bitcodeVar actualType' (symbolTable ctx)
-    in ctx { symbolTable = symbolTable' }
+codeGenDecVarNoInit' :: Ast.DecVarContent -> CodeGenContext ()
+codeGenDecVarNoInit' decVar = do
+    ctx <- get;
+    let varName = Ast.decVarName decVar
+    let nominalType = Ast.decVarNominalType decVar
+    let actualType = SymbolTable.lookupNominalType nominalType (symbolTable ctx)
+    let actualType' = case actualType of { Nothing -> ActualType.Any; Just t -> t }
+    let bitcodeVar = Bitcode.SrcVariableCtor $ Bitcode.SrcVariable (Fqn.fromActualType actualType') varName
+    let symbolTable' = SymbolTable.insertVar varName bitcodeVar actualType' (symbolTable ctx)
+    put $ ctx { symbolTable = symbolTable' }
 
 -- | Non monadic helper function for updating the symbol table
-codeGenDecVarInit' :: Token.VarName -> Ast.Exp -> CodeGenState -> CodeGenState
-codeGenDecVarInit' varName initValue ctx = let
-    init' = codeGenExp initValue ctx;
-    actualType = inferredActualType init';
-    fqn = Fqn.fromActualType actualType;
-    bitcodeVar = Bitcode.SrcVariableCtor $ Bitcode.SrcVariable fqn varName
-    symbolTable' = SymbolTable.insertVar varName bitcodeVar actualType (symbolTable ctx)
-    in ctx { symbolTable = symbolTable' }
+codeGenDecVarInit' :: Token.VarName -> Ast.Exp -> CodeGenContext ()
+codeGenDecVarInit' varName initValue = do
+    init' <- codeGenExp initValue;
+    ctx <- get;
+    let actualType = inferredActualType init';
+    let fqn = Fqn.fromActualType actualType;
+    let bitcodeVar = Bitcode.SrcVariableCtor $ Bitcode.SrcVariable fqn varName
+    let symbolTable' = SymbolTable.insertVar varName bitcodeVar actualType (symbolTable ctx)
+    put $ ctx { symbolTable = symbolTable' }
 
 -- | Non monadic helper function for creating the cfg of the init value
 codeGenDecVarInit'' :: Token.VarName -> Fqn -> (Cfg, Bitcode.Variable) -> Cfg
