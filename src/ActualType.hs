@@ -6,6 +6,7 @@ module ActualType
 where
 
 -- project imports
+import Location
 import qualified Ast
 import qualified Token
 
@@ -28,6 +29,7 @@ data ActualType
    | NativeTypeConstStr String
    | NativeTypeConstBool
    | Class ClassContent
+   | Lambda LambdaContent
    | Method MethodContent
    | Package PackageContent
    | Function FunctionContent
@@ -126,6 +128,14 @@ data MethodContent
          methodParams :: Params
      }
      deriving ( Show, Eq, Ord, Generic )
+
+data LambdaContent
+   = LambdaContent
+     {
+         lambdaLocation :: Location
+     }
+     deriving ( Show, Eq, Ord, Generic )
+
 
 data ThirdPartyImportContent
    = ThirdPartyImportContent

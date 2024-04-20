@@ -1,3 +1,5 @@
+{-# OPTIONS -Werror=missing-fields #-}
+
 module CodeGen
 
 where
@@ -6,6 +8,7 @@ where
 import Fqn
 import Cfg 
 import Asts
+import Callable
 import Location
 import ActualType hiding ( returnType )
 import Bitcode (
@@ -23,14 +26,12 @@ import qualified ActualType
 import qualified SymbolTable
 
 -- general imports
-import Data.Set ( fromList )
 import Data.Maybe ( catMaybes )
 
 -- general imports
 import Data.List
 import Control.Arrow
 import Control.Monad.State.Lazy
-import Control.Monad ( foldM )
 
 data CodeGenState
    = CodeGenState
@@ -39,7 +40,8 @@ data CodeGenState
          returnValue :: Maybe Bitcode.TmpVariable,
          returnTo :: Maybe Cfg,
          continueTo :: Maybe Cfg,
-         breakTo :: Maybe Cfg
+         breakTo :: Maybe Cfg,
+         callables :: [ Callable ]
      }
      deriving ( Show )
 
@@ -64,22 +66,61 @@ initCodeGenState = CodeGenState {
     returnValue = Nothing,
     returnTo = Nothing,
     continueTo = Nothing,
-    breakTo = Nothing
+    breakTo = Nothing,
+    callables = []
 }
 
+-- | API: generates code packed as a collection of callables
+codeGen :: Asts -> Callables
+codeGen = Callables . codeGen' . astsContent
+
+-- | /all/ the files / asts from a given language are handled together
+codeGen' :: [ Ast.Root ] -> [ Callable ]
+codeGen' asts = callables $ execState (codeGenRoots asts) initCodeGenState
+
+-- | no return value - computations are accummulated in the state
+codeGenRoots :: [ Ast.Root ] -> CodeGenContext ()
+codeGenRoots = mapM_ codeGenRoot 
+
 -- |
--- * API function is /non/ monadic
+-- * possibly /changing the original order/ of the file
 --
--- * It launches monadic computations from initial code gen state
-codeGen :: Asts -> [ Cfg ]
-codeGen asts = evalState (codeGenRoots (astsContent asts)) initCodeGenState
+-- * statements are collected and handled first
+--
+-- * declarations are handled second
+--
+codeGenRoot :: Ast.Root -> CodeGenContext ()
+codeGenRoot ast = do { codeGenStmtsPart (Ast.stmts ast); codeGenDecsPart (Ast.decs ast) }
 
-codeGenRoots :: [ Ast.Root ] -> CodeGenContext [ Cfg ]
-codeGenRoots = mapM codeGenRoot 
+-- |
+-- traversing the statements of the file has 2 effects:
+--
+-- * generating the "script" callable
+--
+-- * generating lambda and function callables
+--
+-- combine the 2 and update the state accordingly
+--
+codeGenStmtsPart :: [ Ast.Stmt ] -> CodeGenContext ()
+codeGenStmtsPart stmts = do
+    scriptCfg <- codeGenStmts stmts -- script part
+    ctx <- get; -- function + lambda callables
+    let callables' = (scriptToCallable scriptCfg) : (callables ctx) -- combine
+    put $ ctx { callables = callables' } -- write back to state
 
-codeGenRoot :: Ast.Root -> CodeGenContext Cfg
-codeGenRoot = codeGenStmts . Ast.stmts
+-- | TODO: implement me ...
+codeGenDecsPart :: [ Ast.Dec ] -> CodeGenContext ()
+codeGenDecsPart _ = return () -- ignore for now 
 
+
+-- | this function is called in two scenarios:
+--
+-- * codegen of the script part of the file
+--
+-- * codegen for the body of a callable
+--
+-- in either case, it returns the cfg, and accummulates callables
+-- (and other info) to the state
 codeGenStmts :: [ Ast.Stmt ] -> CodeGenContext Cfg 
 codeGenStmts stmts = do { cfgs <- codeGenStmts' stmts; return $ foldl' Cfg.concat (Cfg.empty defaultLoc) cfgs }
 
@@ -113,16 +154,39 @@ codeGenExp (Ast.ExpInt    expInt    ) = return $ codeGenExpInt expInt -- ctx not
 codeGenExp (Ast.ExpStr    expStr    ) = return $ codeGenExpStr expStr -- ctx not needed
 codeGenExp (Ast.ExpVar    expVar    ) = codeGenExpVar expVar
 codeGenExp (Ast.ExpCall   expCall   ) = codeGenExpCall expCall
-codeGenExp (Ast.ExpLambda expLambda ) = codeGenExpLambda expLambda -- truly monadic function
+codeGenExp (Ast.ExpLambda expLambda ) = codeGenExpLambda expLambda
 codeGenExp _                          = return $ GeneratedExp (Cfg.empty defaultLoc) dummyTmpVar dummyActualType
 
+-- |
+-- two things happen during codegen of lambdas:
+--
+-- * the lambda callable is inserted to the state
+--
+-- * a temporary variable is created, indicative of the lambda (by location)
+--
 codeGenExpLambda :: Ast.ExpLambdaContent -> CodeGenContext GeneratedExp
-codeGenExpLambda expLambda = return $ GeneratedExp (Cfg.empty defaultLoc) dummyTmpVar dummyActualType
-    -- symbolTable' = insertParams (Ast.expLambdaParams expLambda) (symbolTable ctx)
-    -- cfgs = evalState (codeGenStmts (Ast.expLambdaBody expLambda)) ctx { symbolTable = symbolTable' }
-    
-    
-    
+codeGenExpLambda e = do { insertLambdaCallable e; codeGenExpLambda' e }
+
+-- | insert the callable to the state
+insertLambdaCallable :: Ast.ExpLambdaContent -> CodeGenContext ()
+insertLambdaCallable expLambda = do
+    lambdaCfg <- codeGenStmts (Ast.expLambdaBody expLambda)
+    ctx <- get;
+    let callables' = (lambdaToCallable lambdaCfg) : (callables ctx) -- combine
+    put $ ctx { callables = callables' } -- write back to state
+
+-- |
+-- * generate an indicative variable (via location).
+--
+-- * cfg is just a single nop instruction ...
+--
+codeGenExpLambda' :: Ast.ExpLambdaContent -> CodeGenContext GeneratedExp
+codeGenExpLambda' expLambda = do
+    let location = (Ast.expLambdaLocation expLambda)
+    let tmpVariable = Bitcode.TmpVariable (Fqn "lambda") location
+    let variable = Bitcode.TmpVariableCtor tmpVariable
+    let actualType = ActualType.Lambda $ ActualType.LambdaContent location
+    return $ GeneratedExp (Cfg.empty location) variable actualType
 
 -- | whenever something goes wrong, or simply not supported
 -- we can generate a non deterministic expression
@@ -359,6 +423,20 @@ codeGenExpStr expStr = let
     instruction = Bitcode.Instruction location $ Bitcode.LoadImmStr loadImmStr
     actualType = ActualType.NativeTypeConstStr constStrValue
     in GeneratedExp (Cfg.atom $ Node instruction) variable actualType
+
+-- minor non interesting helper functions here
+
+scriptToCallable :: Cfg -> Callable
+scriptToCallable cfg = let
+    filename = Location.filename (Cfg.location cfg)
+    content = Callable.ScriptContent filename cfg
+    in Callable.Script content
+
+lambdaToCallable :: Cfg -> Callable
+lambdaToCallable cfg = let
+    location = Cfg.location cfg
+    content = Callable.LambdaContent cfg location
+    in Callable.Lambda content
 
 -- | Temporarily
 defaultLoc :: Location
