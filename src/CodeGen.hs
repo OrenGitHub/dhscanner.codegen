@@ -253,6 +253,7 @@ getReturnActualType' _ = ActualType.Any
 -- | normal case currently ignores overloading
 getReturnActualType'' :: Callee -> ActualType
 getReturnActualType'' (GeneratedExp _ _ (ActualType.Function f)) = (ActualType.returnType f)
+getReturnActualType'' (GeneratedExp _ _ (ActualType.ThirdPartyImport i)) = (ActualType.ThirdPartyImport i)
 getReturnActualType'' _ = ActualType.Any
 
 -- | separate javascript `require` calls
