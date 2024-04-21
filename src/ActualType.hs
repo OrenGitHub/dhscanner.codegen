@@ -6,6 +6,7 @@ module ActualType
 where
 
 -- project imports
+import Fqn
 import Location
 import qualified Ast
 import qualified Token
@@ -149,3 +150,7 @@ data PackageContent
      {
      }
      deriving ( Show, Eq, Ord, Generic )
+
+toFqn :: ActualType -> Fqn
+toFqn (ThirdPartyImport (ThirdPartyImportContent name)) = Fqn name
+toFqn _ = Fqn.nativeInt

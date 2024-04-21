@@ -272,7 +272,7 @@ buildTheActualCall c a t = Cfg.atom $ Cfg.Node $ (Bitcode.Instruction defaultLoc
 codeGenExpCall' :: Callee -> Args -> Location -> GeneratedExp
 codeGenExpCall' callee args location = let
     returnType = getReturnActualType callee args
-    output = Bitcode.TmpVariableCtor $ Bitcode.TmpVariable (Fqn.fromActualType returnType) location
+    output = Bitcode.TmpVariableCtor $ Bitcode.TmpVariable (ActualType.toFqn returnType) location
     actualCall = buildTheActualCall callee args output
     prepareCall = foldl' Cfg.concat (generatedCfg callee) (Data.List.map generatedCfg args)
     in GeneratedExp (prepareCall `Cfg.concat` actualCall) output returnType
@@ -362,7 +362,7 @@ codeGenDecVarNoInit d loc = do { codeGenDecVarNoInit' d; return $ Cfg.empty loc 
 codeGenDecVarInit :: Token.VarName -> Token.NominalTy -> Ast.Exp -> CodeGenContext Cfg
 codeGenDecVarInit varName nominalType init = do
     init' <- codeGenExp init;
-    let fqn = Fqn.fromActualType (inferredActualType init');
+    let fqn = ActualType.toFqn (inferredActualType init');
     codeGenDecVarInit' varName init;
     return $ codeGenDecVarInit'' varName fqn (generatedCfg init', generatedValue init')
 
@@ -375,7 +375,7 @@ codeGenDecVarNoInit' decVar = do
     let nominalType = Ast.decVarNominalType decVar
     let actualType = SymbolTable.lookupNominalType nominalType (symbolTable ctx)
     let actualType' = case actualType of { Nothing -> ActualType.Any; Just t -> t }
-    let bitcodeVar = Bitcode.SrcVariableCtor $ Bitcode.SrcVariable (Fqn.fromActualType actualType') varName
+    let bitcodeVar = Bitcode.SrcVariableCtor $ Bitcode.SrcVariable (ActualType.toFqn actualType') varName
     let symbolTable' = SymbolTable.insertVar varName bitcodeVar actualType' (symbolTable ctx)
     put $ ctx { symbolTable = symbolTable' }
 
@@ -385,7 +385,7 @@ codeGenDecVarInit' varName initValue = do
     init' <- codeGenExp initValue;
     ctx <- get;
     let actualType = inferredActualType init';
-    let fqn = Fqn.fromActualType actualType;
+    let fqn = ActualType.toFqn actualType;
     let bitcodeVar = Bitcode.SrcVariableCtor $ Bitcode.SrcVariable fqn varName
     let symbolTable' = SymbolTable.insertVar varName bitcodeVar actualType (symbolTable ctx)
     put $ ctx { symbolTable = symbolTable' }
