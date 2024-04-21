@@ -196,7 +196,7 @@ nondet location = let
     arbitraryValue = Token.VarName (Token.Named "arbitrary_value" location)
     callee = Bitcode.SrcVariableCtor $ Bitcode.SrcVariable Fqn.any nondetFunc
     output = Bitcode.SrcVariableCtor $ Bitcode.SrcVariable Fqn.any arbitraryValue
-    call = Bitcode.Call (Bitcode.CallContent output callee [])
+    call = Bitcode.Call (Bitcode.CallContent output callee [] location)
     instruction = Bitcode.Instruction location call
     cfg = Cfg.atom (Cfg.Node instruction)
     in GeneratedExp cfg output ActualType.Any 
@@ -260,20 +260,20 @@ getReturnActualType :: Callee -> Args -> ActualType
 getReturnActualType (GeneratedExp _ _ ActualType.Require) args = getReturnActualType' args
 getReturnActualType callee _ = getReturnActualType'' callee
 
-buildTheActualCall' :: Callee -> Args -> Bitcode.Variable -> Bitcode.CallContent
-buildTheActualCall' callee args output = let
+buildTheActualCall' :: Callee -> Args -> Bitcode.Variable -> Location -> Bitcode.CallContent
+buildTheActualCall' callee args output location = let
     callee' = generatedValue callee
     args' = Data.List.map generatedValue args
-    in Bitcode.CallContent output callee' args'
+    in Bitcode.CallContent output callee' args' location
 
-buildTheActualCall :: Callee -> Args -> Bitcode.Variable -> Cfg
-buildTheActualCall c a t = Cfg.atom $ Cfg.Node $ (Bitcode.Instruction defaultLoc) $ Bitcode.Call $ buildTheActualCall' c a t
+buildTheActualCall :: Callee -> Args -> Bitcode.Variable -> Location -> Cfg
+buildTheActualCall c a v l = Cfg.atom $ Cfg.Node $ (Bitcode.Instruction l) $ Bitcode.Call $ buildTheActualCall' c a v l
 
 codeGenExpCall' :: Callee -> Args -> Location -> GeneratedExp
 codeGenExpCall' callee args location = let
     returnType = getReturnActualType callee args
     output = Bitcode.TmpVariableCtor $ Bitcode.TmpVariable (ActualType.toFqn returnType) location
-    actualCall = buildTheActualCall callee args output
+    actualCall = buildTheActualCall callee args output location
     prepareCall = foldl' Cfg.concat (generatedCfg callee) (Data.List.map generatedCfg args)
     in GeneratedExp (prepareCall `Cfg.concat` actualCall) output returnType
 
