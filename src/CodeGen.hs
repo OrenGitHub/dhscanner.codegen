@@ -167,13 +167,51 @@ codeGenExp _                          = return $ GeneratedExp (Cfg.empty default
 codeGenExpLambda :: Ast.ExpLambdaContent -> CodeGenContext GeneratedExp
 codeGenExpLambda e = do { insertLambdaCallable e; codeGenExpLambda' e }
 
+-- beginScope :: CodeGenContext ()
+-- endScope   :: CodeGenContext ()
+
+beginScope = do { ctx <- get; put $ ctx { symbolTable = SymbolTable.beginScope (symbolTable ctx) } }
+endScope   = do { ctx <- get; put $ ctx { symbolTable = SymbolTable.endScope   (symbolTable ctx) } }
+
+handleLambda :: Ast.ExpLambdaContent -> CodeGenContext Callable
+handleLambda lambda = do
+    paramDeclsCfg <- codeGenLambdaParams lambda
+    lambdaBodyCfg <- codeGenStmts (Ast.expLambdaBody lambda)
+    return (lambdaToCallable (Cfg.concat paramDeclsCfg lambdaBodyCfg))
+
+handleLambdaCallable :: Ast.ExpLambdaContent -> CodeGenContext Callable
+handleLambdaCallable lambda = do { beginScope; callable <- handleLambda lambda; endScope; return callable }
+
 -- | insert the callable to the state
 insertLambdaCallable :: Ast.ExpLambdaContent -> CodeGenContext ()
-insertLambdaCallable expLambda = do
-    lambdaCfg <- codeGenStmts (Ast.expLambdaBody expLambda)
-    ctx <- get;
-    let callables' = (lambdaToCallable lambdaCfg) : (callables ctx) -- combine
-    put $ ctx { callables = callables' } -- write back to state
+insertLambdaCallable expLambda = do { c <- handleLambdaCallable expLambda; ctx <- get; put $ ctx { callables = c:(callables ctx) } }
+
+codeGenLambdaParams :: Ast.ExpLambdaContent -> CodeGenContext Cfg
+codeGenLambdaParams = codeGenLambdaParams' . Ast.expLambdaParams
+
+codeGenLambdaParams' :: [ Ast.Param ] -> CodeGenContext Cfg
+codeGenLambdaParams' params = do
+    cfgs <- codeGenLambdaParams'' 0 params
+    return $ foldl' Cfg.concat (Cfg.empty defaultLoc) cfgs
+
+codeGenLambdaParams'' :: Word -> [ Ast.Param ] -> CodeGenContext [ Cfg ]
+codeGenLambdaParams'' _ [] = return []
+codeGenLambdaParams'' i (p:ps) = do { cfg <- codeGenLambdaParam i p; cfgs <- codeGenLambdaParams'' (i+1) ps; return (cfg:cfgs) }
+
+codeGenLambdaParam :: Word -> Ast.Param -> CodeGenContext Cfg
+codeGenLambdaParam paramSerialIdx param = do
+    ctx <- get
+    let paramName = Ast.paramName param
+    let location = Token.getParamNameLocation paramName
+    let paramNominalType = Ast.paramNominalType param
+    let actualType = SymbolTable.lookupNominalType paramNominalType (symbolTable ctx)
+    let paramFqn = ActualType.toFqn actualType
+    let paramVar = Bitcode.ParamVariable paramFqn paramSerialIdx paramName
+    let paramDecl = Bitcode.ParamDecl $ Bitcode.ParamDeclContent paramVar
+    let instruction = Bitcode.Instruction location paramDecl
+    let v = Bitcode.ParamVariableCtor paramVar
+    put (ctx { symbolTable = SymbolTable.insertParam paramName v actualType (symbolTable ctx) })
+    return (Cfg.atom (Cfg.Node instruction))
 
 -- |
 -- * generate an indicative variable (via location).
@@ -375,9 +413,8 @@ codeGenDecVarNoInit' decVar = do
     let varName = Ast.decVarName decVar
     let nominalType = Ast.decVarNominalType decVar
     let actualType = SymbolTable.lookupNominalType nominalType (symbolTable ctx)
-    let actualType' = case actualType of { Nothing -> ActualType.Any; Just t -> t }
-    let bitcodeVar = Bitcode.SrcVariableCtor $ Bitcode.SrcVariable (ActualType.toFqn actualType') varName
-    let symbolTable' = SymbolTable.insertVar varName bitcodeVar actualType' (symbolTable ctx)
+    let bitcodeVar = Bitcode.SrcVariableCtor $ Bitcode.SrcVariable (ActualType.toFqn actualType) varName
+    let symbolTable' = SymbolTable.insertVar varName bitcodeVar actualType (symbolTable ctx)
     put $ ctx { symbolTable = symbolTable' }
 
 -- | Non monadic helper function for updating the symbol table

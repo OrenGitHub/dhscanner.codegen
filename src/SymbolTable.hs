@@ -75,13 +75,16 @@ varExists v table = varExists' (Token.content (Token.getVarNameToken v)) (scopes
 insertVar:: Token.VarName -> Bitcode.Variable -> ActualType -> SymbolTable -> SymbolTable
 insertVar name v t = insert (Token.getVarNameToken name) v t
 
+insertParam:: Token.ParamName -> Bitcode.Variable -> ActualType -> SymbolTable -> SymbolTable
+insertParam name v t = insert (Token.getParamNameToken name) v t
+
 lookupVar :: Token.VarName -> SymbolTable -> Maybe (Bitcode.Variable, ActualType)
 lookupVar v table = lookup' (Token.content $ Token.getVarNameToken v) (scopes table)
 
-lookupNominalType :: Token.NominalTy -> SymbolTable -> Maybe ActualType
+lookupNominalType :: Token.NominalTy -> SymbolTable -> ActualType
 lookupNominalType t table = case lookup' (Token.content $ Token.getNominalTyToken t) (scopes table) of
-    Nothing -> Nothing
-    Just (_, actualType) -> Just actualType
+    Nothing -> ActualType.Any
+    Just (_, actualType) -> actualType
 
 -- Internal (recursive) lookup
 -- The scopes list starts with the /innermost/ scope
