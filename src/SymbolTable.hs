@@ -47,15 +47,29 @@ beginScope = SymbolTable . (newEmptyScope:) . scopes
 endScope :: SymbolTable -> SymbolTable
 endScope = SymbolTable . tail . scopes
 
+createFstringFunc :: Token.FuncName -> ActualType
+createFstringFunc f = let
+    params = ActualType.Params [] -- ignore the params, they are irrelevant
+    strRetType = ActualType.NativeTypeStr
+    f' = ActualType.FunctionContent f params strRetType
+    in ActualType.Function f'
+
 runtimeScope :: Scope
 runtimeScope = let
     location = Location "nodejs" 0 0 0 0 -- native nodejs function
+    location' = Location "fstring" 0 0 0 0 -- instrumented format string function
     varName = Token.VarName (Token.Named "require" location)
+    varName' = Token.VarName (Token.Named "fstring" location')
     requireSpecialVar = Bitcode.SrcVariableCtor $ Bitcode.SrcVariable (Fqn "nodejs.require") varName
-    in Scope $ Data.Map.fromList [("require",(requireSpecialVar,ActualType.Require))] 
+    fstringSpecialVar = Bitcode.SrcVariableCtor $ Bitcode.SrcVariable (Fqn "nodehs.fstring") varName'
+    fstringFuncName = Token.FuncName (Token.Named "fstring" location')
+    fstringFunc = createFstringFunc fstringFuncName
+    require = ("require", (requireSpecialVar, ActualType.Require))
+    fstring = ("fstring", (fstringSpecialVar, fstringFunc))
+    in Scope $ Data.Map.fromList [ require, fstring ]
 
 emptySymbolTable :: SymbolTable
-emptySymbolTable = SymbolTable { scopes = [runtimeScope] }
+emptySymbolTable = SymbolTable { scopes = [ runtimeScope ] }
 
 insert' :: String -> Bitcode.Variable -> ActualType -> Scope -> Scope
 insert' content b t (Scope s) = Scope $ Data.Map.insert content (b,t) s
