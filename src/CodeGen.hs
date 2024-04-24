@@ -177,7 +177,7 @@ handleLambda :: Ast.ExpLambdaContent -> CodeGenContext Callable
 handleLambda lambda = do
     paramDeclsCfg <- codeGenLambdaParams lambda
     lambdaBodyCfg <- codeGenStmts (Ast.expLambdaBody lambda)
-    return (lambdaToCallable (Cfg.concat paramDeclsCfg lambdaBodyCfg))
+    return $ lambdaToCallable (Cfg.concat paramDeclsCfg lambdaBodyCfg) (Ast.expLambdaLocation lambda)
 
 handleLambdaCallable :: Ast.ExpLambdaContent -> CodeGenContext Callable
 handleLambdaCallable lambda = do { beginScope; callable <- handleLambda lambda; endScope; return callable }
@@ -470,9 +470,8 @@ scriptToCallable cfg = let
     content = Callable.ScriptContent filename cfg
     in Callable.Script content
 
-lambdaToCallable :: Cfg -> Callable
-lambdaToCallable cfg = let
-    location = Cfg.location cfg
+lambdaToCallable :: Cfg -> Location -> Callable
+lambdaToCallable cfg location = let
     content = Callable.LambdaContent cfg location
     in Callable.Lambda content
 
