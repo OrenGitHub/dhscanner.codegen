@@ -203,10 +203,13 @@ codeGenLambdaParam paramSerialIdx param = do
     ctx <- get
     let paramName = Ast.paramName param
     let location = Token.getParamNameLocation paramName
-    let paramNominalType = Ast.paramNominalType param
-    let actualType = SymbolTable.lookupNominalType paramNominalType (symbolTable ctx)
-    let paramFqn = ActualType.toFqn actualType
-    let paramVar = Bitcode.ParamVariable paramFqn paramSerialIdx paramName
+    let nominalType = Ast.paramNominalType param
+    let nominalTypeName = Token.content (Token.getNominalTyToken nominalType)
+    let actualType = SymbolTable.lookupNominalType nominalType (symbolTable ctx)
+    let fqn' = ActualType.toFqn actualType
+    let fqn'' = Fqn (Token.content (Token.getParamNameToken paramName))
+    let fqn = case nominalTypeName == "any" of { True -> fqn''; False -> fqn' }
+    let paramVar = Bitcode.ParamVariable fqn paramSerialIdx paramName
     let paramDecl = Bitcode.ParamDecl $ Bitcode.ParamDeclContent paramVar
     let instruction = Bitcode.Instruction location paramDecl
     let v = Bitcode.ParamVariableCtor paramVar
