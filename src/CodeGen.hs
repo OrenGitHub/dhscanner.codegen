@@ -133,7 +133,7 @@ codeGenStmt :: Ast.Stmt -> CodeGenContext Cfg
 codeGenStmt (Ast.StmtIf     stmtIf    ) = return $ Cfg.empty defaultLoc
 codeGenStmt (Ast.StmtCall   stmtCall  ) = codeGenStmtCall stmtCall
 codeGenStmt (Ast.StmtDecvar stmtDecVar) = codeGenStmtDecvar stmtDecVar
-codeGenStmt (Ast.StmtAssign stmtAssign) = return $ Cfg.empty defaultLoc
+codeGenStmt (Ast.StmtAssign stmtAssign) = codeGenStmtAssign stmtAssign
 codeGenStmt _                           = return $ Cfg.empty defaultLoc
 
 dummyTmpVar :: Bitcode.Variable
@@ -344,33 +344,41 @@ createBitcodeVarIfNeeded v = do { ctx <- get; put $ let
     in case bitcodeVarExists of { True -> ctx; False -> ctx { symbolTable = symbolTable' } }
 }
 
--- | dynamic languages often have variable declarations
+-- |
+--
+-- * dynamic languages often have variable declarations
 -- "hide" in plain assignment syntax - this means that
 -- assignment scanned according to their "ast order"
 -- will insert the assigned variable to the symbol table
 -- (if it hasn't been inserted before)
-codeGenStmtAssignToSimpleVar :: Ast.VarSimpleContent -> Ast.Exp -> CodeGenContext Cfg
-codeGenStmtAssignToSimpleVar astSimpleVar init = do
-    createBitcodeVarIfNeeded astSimpleVar;
-    init' <- codeGenExp init;
+--
+-- * this is /very/ similar to `codeGenDecVarInit`
+--
+codeGenStmtAssignToSimpleVar :: Token.VarName -> Ast.Exp -> CodeGenContext Cfg
+codeGenStmtAssignToSimpleVar varName init = do
+    init' <- codeGenExp init
     ctx <- get;
-    let varName = Ast.varName astSimpleVar;
-    let location = Token.getVarNameLocation varName;
-    let dst = SymbolTable.lookupVar varName (symbolTable ctx);
-    let output = case dst of { Nothing -> generatedValue init'; Just dst' -> fst dst' }
-    let content = Bitcode.AssignContent output (generatedValue init');
-    let instruction = Bitcode.Instruction location $ Bitcode.Assign content;
-    return $ Cfg.concat (generatedCfg init') (Cfg.atom $ Node instruction)
-
+    let initCfg = generatedCfg init'
+    let initVariable = generatedValue init'
+    let actualType = inferredActualType init'
+    let fqn = ActualType.toFqn actualType
+    let location = Token.getVarNameLocation varName
+    let srcVariable = Bitcode.SrcVariableCtor $ Bitcode.SrcVariable fqn varName
+    let symbolTable' = SymbolTable.insertVar varName srcVariable actualType (symbolTable ctx)
+    let varAlreadyExists = SymbolTable.varExists varName (symbolTable ctx)
+    let updateSymbolTable = ctx { symbolTable = symbolTable' }
+    let dontChangeCtx = ctx
+    -- conditional update of the symbol table
+    -- this is the part that is different from `codeGenDecVarInit`
+    put $ case varAlreadyExists of { True -> updateSymbolTable; False -> updateSymbolTable }
+    return $ initCfg `Cfg.concat` (createAssignCfg location srcVariable initVariable)
+    
 codeGenStmtAssignToFieldVar :: Ast.VarFieldContent -> Ast.Exp -> CodeGenContext Cfg
 codeGenStmtAssignToFieldVar v e = undefined
 
--- codeGenStmtAssignToSubscriptVar :: Ast.VarSubscriptContent -> Ast.Exp -> CodeGenState -> (Cfg, Bitcode.TmpVariable, ActualType)
--- codeGenStmtAssignToSubscriptVar v e ctx = undefined
-
 codeGenStmtAssign' :: Ast.Var -> Ast.Exp -> CodeGenContext Cfg
-codeGenStmtAssign' (Ast.VarSimple    v) e = codeGenStmtAssignToSimpleVar    v e
-codeGenStmtAssign' (Ast.VarField     v) e = codeGenStmtAssignToFieldVar     v e
+codeGenStmtAssign' (Ast.VarSimple    v) e = codeGenStmtAssignToSimpleVar (Ast.varName v) e
+codeGenStmtAssign' (Ast.VarField     v) e = codeGenStmtAssignToFieldVar v e
 codeGenStmtAssign' _ _ = undefined -- codeGenStmtAssignToSubscriptVar v e
 
 -- | dynamic languages often have variable declarations
