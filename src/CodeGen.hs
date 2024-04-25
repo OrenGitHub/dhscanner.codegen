@@ -271,17 +271,19 @@ codeGenExpVarField :: Ast.VarFieldContent -> CodeGenContext GeneratedExp
 codeGenExpVarField v = do
     v' <- codeGenExp (Ast.ExpVar (Ast.varFieldLhs v))
     let fieldName = Ast.varFieldName v
+    let cfgLhsExpVar = generatedCfg v'
+    let input = generatedValue v'
     let actualType = inferredActualType v'
-    let inputFqn = Bitcode.variableFqn (generatedValue v')
+    let inputFqn = Bitcode.variableFqn input
     let fieldNameContent = Token.content (Token.getFieldNameToken fieldName)
     let outputFqn = Fqn ((Fqn.content inputFqn) ++ "." ++ fieldNameContent)
-    let locationInput = Ast.locationVar (Ast.actualExpVar (Ast.varFieldLhs v))
-    let input = Bitcode.TmpVariableCtor (Bitcode.TmpVariable inputFqn locationInput)
-    let locationOutput = Ast.varFieldLocation v
-    let output = Bitcode.TmpVariableCtor (Bitcode.TmpVariable outputFqn locationOutput)
+    let location = Ast.varFieldLocation v
+    let output = Bitcode.TmpVariableCtor (Bitcode.TmpVariable outputFqn location)
     let fieldReadContent = Bitcode.FieldReadContent output input fieldName
     let fieldRead = Bitcode.FieldRead fieldReadContent
-    let cfg = Cfg.atom (Cfg.Node (Bitcode.Instruction locationOutput fieldRead))
+    let fieldReadInstruction = Bitcode.Instruction location fieldRead
+    let cfgFieldRead = Cfg.atom (Cfg.Node fieldReadInstruction)
+    let cfg = cfgLhsExpVar `Cfg.concat` cfgFieldRead
     return $ GeneratedExp cfg output (getExpVarFieldActualType actualType fieldName)
 
 -- | dispatch codegen (exp) var handlers
