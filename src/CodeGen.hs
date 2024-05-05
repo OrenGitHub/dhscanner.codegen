@@ -134,7 +134,24 @@ codeGenStmt (Ast.StmtIf     stmtIf    ) = return $ Cfg.empty defaultLoc
 codeGenStmt (Ast.StmtCall   stmtCall  ) = codeGenStmtCall stmtCall
 codeGenStmt (Ast.StmtDecvar stmtDecVar) = codeGenStmtDecvar stmtDecVar
 codeGenStmt (Ast.StmtAssign stmtAssign) = codeGenStmtAssign stmtAssign
+codeGenStmt (Ast.StmtImport stmtImport) = codeGenStmtImport stmtImport
 codeGenStmt _                           = return $ Cfg.empty defaultLoc
+
+codeGenStmtImport :: Ast.StmtImportContent -> CodeGenContext Cfg
+codeGenStmtImport stmtImport = do
+    ctx <- get
+    let name = (Ast.stmtImportName stmtImport)
+    let alias = (Ast.stmtImportAlias stmtImport)
+    let location = (Ast.stmtImportLocation stmtImport)
+    let aliasToken = Token.Named alias location
+    let aliasVar = Token.VarName aliasToken
+    let aliasType = Token.NominalTy aliasToken
+    let srcVariable = Bitcode.SrcVariableCtor $ Bitcode.SrcVariable (Fqn alias) aliasVar
+    let thirdParty = ActualType.ThirdPartyImportContent ("composer.laravel" ++ alias)
+    let actualType = ActualType.ThirdPartyImport thirdParty
+    let symbolTable' = SymbolTable.insertVar aliasVar srcVariable actualType (symbolTable ctx)
+    put $ ctx { symbolTable = symbolTable' }
+    return $ Cfg.empty location
 
 dummyTmpVar :: Bitcode.Variable
 dummyTmpVar = Bitcode.TmpVariableCtor $ Bitcode.TmpVariable Fqn.nativeInt defaultLoc
