@@ -54,19 +54,27 @@ createFstringFunc f = let
     f' = ActualType.FunctionContent f params strRetType
     in ActualType.Function f'
 
+createOsPython :: ActualType
+createOsPython = ActualType.ThirdPartyImport $ ActualType.ThirdPartyImportContent "python.os"
+
 runtimeScope :: Scope
 runtimeScope = let
-    location = Location "nodejs" 0 0 0 0 -- native nodejs function
+    jsloc = Location "nodejs" 0 0 0 0 -- for native nodejs functions
+    pyloc = Location "python" 0 0 0 0 -- for native python functions
     location' = Location "fstring" 0 0 0 0 -- instrumented format string function
-    varName = Token.VarName (Token.Named "require" location)
-    varName' = Token.VarName (Token.Named "fstring" location')
-    requireSpecialVar = Bitcode.SrcVariableCtor $ Bitcode.SrcVariable (Fqn "nodejs.require") varName
-    fstringSpecialVar = Bitcode.SrcVariableCtor $ Bitcode.SrcVariable (Fqn "nodehs.fstring") varName'
+    varNameRequire = Token.VarName (Token.Named "require" jsloc)
+    varNameFstring = Token.VarName (Token.Named "fstring" location')
+    varNameOsPython = Token.VarName (Token.Named "python.os" pyloc)
+    requireSpecialVar = Bitcode.SrcVariableCtor $ Bitcode.SrcVariable (Fqn "nodejs.require") varNameRequire
+    fstringSpecialVar = Bitcode.SrcVariableCtor $ Bitcode.SrcVariable (Fqn "fstring") varNameFstring
+    osPythonVar = Bitcode.SrcVariableCtor $ Bitcode.SrcVariable (Fqn "python.os") varNameOsPython
     fstringFuncName = Token.FuncName (Token.Named "fstring" location')
     fstringFunc = createFstringFunc fstringFuncName
+    osPython = createOsPython
     require = ("require", (requireSpecialVar, ActualType.Require))
     fstring = ("fstring", (fstringSpecialVar, fstringFunc))
-    in Scope $ Data.Map.fromList [ require, fstring ]
+    os      = ("os",      (osPythonVar, osPython)) 
+    in Scope $ Data.Map.fromList [ require, fstring, os ]
 
 emptySymbolTable :: SymbolTable
 emptySymbolTable = SymbolTable { scopes = [ runtimeScope ] }

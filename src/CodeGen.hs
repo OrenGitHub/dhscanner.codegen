@@ -178,12 +178,15 @@ codeGenStmtImport stmtImport = do
     let name = (Ast.stmtImportName stmtImport)
     let alias = (Ast.stmtImportAlias stmtImport)
     let location = (Ast.stmtImportLocation stmtImport)
+    let nameToken = Token.Named name location
     let aliasToken = Token.Named alias location
+    let nameVar = Token.VarName nameToken
     let aliasVar = Token.VarName aliasToken
     let aliasType = Token.NominalTy aliasToken
     let srcVariable = Bitcode.SrcVariableCtor $ Bitcode.SrcVariable (Fqn name) aliasVar
-    let thirdParty = ActualType.ThirdPartyImportContent (name)
-    let actualType = ActualType.ThirdPartyImport thirdParty
+    let thirdParty = ActualType.ThirdPartyImport (ActualType.ThirdPartyImportContent name)
+    let existingType = SymbolTable.lookupVar nameVar (symbolTable ctx)
+    let actualType = case existingType of { Nothing -> thirdParty; Just (_,t) -> t }
     let symbolTable' = SymbolTable.insertVar aliasVar srcVariable actualType (symbolTable ctx)
     put $ ctx { symbolTable = symbolTable' }
     return $ Cfg.empty location
@@ -309,15 +312,14 @@ codeGenExpVarSimple v ctx = case SymbolTable.lookupVar (Ast.varName v) (symbolTa
     Nothing -> codeGenExpVarSimpleMissing (Token.getVarNameLocation (Ast.varName v))
     Just (bitcodeVar, actualType) -> codeGenExpVarSimpleExisting (Ast.varName v) bitcodeVar actualType
 
-getExpVarField3rdPartyType' :: String -> String -> ActualType
-getExpVarField3rdPartyType' i f = ThirdPartyImport $ ThirdPartyImportContent $ i ++ "." ++ f
-
-getExpVarField3rdPartyType :: String -> Token.FieldName -> ActualType
-getExpVarField3rdPartyType i f = getExpVarField3rdPartyType' i (Token.content (Token.getFieldNameToken f)) 
-
-getExpVarFieldActualType :: ActualType -> Token.FieldName -> ActualType
-getExpVarFieldActualType (ThirdPartyImport (ThirdPartyImportContent i)) f = getExpVarField3rdPartyType i f
-getExpVarFieldActualType _ _ = ActualType.Any
+getFieldedAccesThirdPartyType :: String -> Token.FieldName -> ActualType
+getFieldedAccesThirdPartyType c fieldName = let
+    rawFieldName = Token.content $ Token.getFieldNameToken fieldName
+    in ThirdPartyImport $ ThirdPartyImportContent (c ++ "." ++ rawFieldName) 
+ 
+getFieldedAccess :: ActualType -> Token.FieldName -> ActualType
+getFieldedAccess (ThirdPartyImport (ThirdPartyImportContent c)) fieldName = getFieldedAccesThirdPartyType c fieldName
+getFieldedAccess actualType _ = actualType
 
 codeGenExpVarField :: Ast.VarFieldContent -> CodeGenContext GeneratedExp
 codeGenExpVarField v = do
@@ -326,9 +328,10 @@ codeGenExpVarField v = do
     let cfgLhsExpVar = generatedCfg v'
     let input = generatedValue v'
     let actualType = inferredActualType v'
+    let actualType' = getFieldedAccess actualType fieldName
     let inputFqn = Bitcode.variableFqn input
     let fieldNameContent = Token.content (Token.getFieldNameToken fieldName)
-    let outputFqn = Fqn ((Fqn.content inputFqn) ++ "." ++ fieldNameContent)
+    let outputFqn = ActualType.toFqn actualType'
     let location = Ast.varFieldLocation v
     let output = Bitcode.TmpVariableCtor (Bitcode.TmpVariable outputFqn location)
     let fieldReadContent = Bitcode.FieldReadContent output input fieldName
@@ -336,7 +339,7 @@ codeGenExpVarField v = do
     let fieldReadInstruction = Bitcode.Instruction location fieldRead
     let cfgFieldRead = Cfg.atom (Cfg.Node fieldReadInstruction)
     let cfg = cfgLhsExpVar `Cfg.concat` cfgFieldRead
-    return $ GeneratedExp cfg output (getExpVarFieldActualType actualType fieldName)
+    return $ GeneratedExp cfg output actualType'
 
 -- | dispatch codegen (exp) var handlers
 codeGenExpVar :: Ast.ExpVarContent -> CodeGenContext GeneratedExp
