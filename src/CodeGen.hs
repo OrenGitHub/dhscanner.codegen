@@ -130,12 +130,47 @@ codeGenStmts' = mapM codeGenStmt
 -- | A simple dispatcher for code gen statements
 -- see `codeGenStmt<TheStatementKindYouWantToInspect>`
 codeGenStmt :: Ast.Stmt -> CodeGenContext Cfg
-codeGenStmt (Ast.StmtIf     stmtIf    ) = return $ Cfg.empty defaultLoc
+codeGenStmt (Ast.StmtIf     stmtIf    ) = codeGenStmtIf stmtIf
 codeGenStmt (Ast.StmtCall   stmtCall  ) = codeGenStmtCall stmtCall
+codeGenStmt (Ast.StmtFunc   stmtFunc  ) = codeGenStmtFunc stmtFunc
 codeGenStmt (Ast.StmtDecvar stmtDecVar) = codeGenStmtDecvar stmtDecVar
 codeGenStmt (Ast.StmtAssign stmtAssign) = codeGenStmtAssign stmtAssign
 codeGenStmt (Ast.StmtImport stmtImport) = codeGenStmtImport stmtImport
 codeGenStmt _                           = return $ Cfg.empty defaultLoc
+
+codeGenStmtIf :: Ast.StmtIfContent -> CodeGenContext Cfg
+codeGenStmtIf stmtIf = do
+    cond <- codeGenExp (Ast.stmtIfCond stmtIf)
+    thenPart <- codeGenStmts (Ast.stmtIfBody stmtIf)
+    elsePart <- codeGenStmts (Ast.stmtIfBody stmtIf)
+    let assumeIfTaken = assumeIfTakenGen (generatedValue cond) (Ast.stmtIfLocation stmtIf)
+    let assumeIfNotTaken = assumeIfNotTakenGen (generatedValue cond) (Ast.stmtIfLocation stmtIf)
+    let thenPartCfg = assumeIfTaken `Cfg.concat` thenPart
+    let elsePartCfg = assumeIfNotTaken `Cfg.concat` elsePart
+    return ((generatedCfg cond) `Cfg.concat` (thenPartCfg `Cfg.parallel` elsePartCfg))
+
+assumeIfTakenGen :: Bitcode.Variable -> Location -> Cfg
+assumeIfTakenGen cond loc = let
+    content = Bitcode.Assume $ Bitcode.AssumeContent cond True
+    instruction = Bitcode.Instruction loc content
+    in Cfg.atom (Cfg.Node instruction)
+
+assumeIfNotTakenGen :: Bitcode.Variable -> Location -> Cfg
+assumeIfNotTakenGen cond loc = let
+    content = Bitcode.Assume $ Bitcode.AssumeContent cond False
+    instruction = Bitcode.Instruction loc content
+    in Cfg.atom (Cfg.Node instruction)
+
+codeGenStmtFunc :: Ast.StmtFuncContent -> CodeGenContext Cfg
+codeGenStmtFunc stmtFunc = do
+    beginScope
+    params <- codeGenParams (Ast.stmtFuncParams stmtFunc)
+    body <- codeGenStmts (Ast.stmtFuncBody stmtFunc)
+    endScope
+    ctx <- get
+    let callables' = (decFuncToCallable stmtFunc (Cfg.concat params body)) : (callables ctx)
+    put (ctx { callables = callables' })
+    return $ Cfg.empty (Token.getFuncNameLocation (Ast.stmtFuncName stmtFunc))
 
 codeGenStmtImport :: Ast.StmtImportContent -> CodeGenContext Cfg
 codeGenStmtImport stmtImport = do
@@ -146,8 +181,8 @@ codeGenStmtImport stmtImport = do
     let aliasToken = Token.Named alias location
     let aliasVar = Token.VarName aliasToken
     let aliasType = Token.NominalTy aliasToken
-    let srcVariable = Bitcode.SrcVariableCtor $ Bitcode.SrcVariable (Fqn ("composer" ++ name)) aliasVar
-    let thirdParty = ActualType.ThirdPartyImportContent ("composer" ++ name)
+    let srcVariable = Bitcode.SrcVariableCtor $ Bitcode.SrcVariable (Fqn name) aliasVar
+    let thirdParty = ActualType.ThirdPartyImportContent (name)
     let actualType = ActualType.ThirdPartyImport thirdParty
     let symbolTable' = SymbolTable.insertVar aliasVar srcVariable actualType (symbolTable ctx)
     put $ ctx { symbolTable = symbolTable' }
@@ -204,19 +239,19 @@ insertLambdaCallable :: Ast.ExpLambdaContent -> CodeGenContext ()
 insertLambdaCallable expLambda = do { c <- handleLambdaCallable expLambda; ctx <- get; put $ ctx { callables = c:(callables ctx) } }
 
 codeGenLambdaParams :: Ast.ExpLambdaContent -> CodeGenContext Cfg
-codeGenLambdaParams = codeGenLambdaParams' . Ast.expLambdaParams
+codeGenLambdaParams = codeGenParams . Ast.expLambdaParams
 
-codeGenLambdaParams' :: [ Ast.Param ] -> CodeGenContext Cfg
-codeGenLambdaParams' params = do
-    cfgs <- codeGenLambdaParams'' 0 params
+codeGenParams :: [ Ast.Param ] -> CodeGenContext Cfg
+codeGenParams params = do
+    cfgs <- codeGenParams' 0 params
     return $ foldl' Cfg.concat (Cfg.empty defaultLoc) cfgs
 
-codeGenLambdaParams'' :: Word -> [ Ast.Param ] -> CodeGenContext [ Cfg ]
-codeGenLambdaParams'' _ [] = return []
-codeGenLambdaParams'' i (p:ps) = do { cfg <- codeGenLambdaParam i p; cfgs <- codeGenLambdaParams'' (i+1) ps; return (cfg:cfgs) }
+codeGenParams' :: Word -> [ Ast.Param ] -> CodeGenContext [ Cfg ]
+codeGenParams' _ [] = return []
+codeGenParams' i (p:ps) = do { cfg <- codeGenParam i p; cfgs <- codeGenParams' (i+1) ps; return (cfg:cfgs) }
 
-codeGenLambdaParam :: Word -> Ast.Param -> CodeGenContext Cfg
-codeGenLambdaParam paramSerialIdx param = do
+codeGenParam :: Word -> Ast.Param -> CodeGenContext Cfg
+codeGenParam paramSerialIdx param = do
     ctx <- get
     let paramName = Ast.paramName param
     let location = Token.getParamNameLocation paramName
@@ -504,6 +539,11 @@ scriptToCallable cfg = let
     filename = Location.filename (Cfg.location cfg)
     content = Callable.ScriptContent filename cfg
     in Callable.Script content
+
+decFuncToCallable :: Ast.StmtFuncContent -> Cfg -> Callable
+decFuncToCallable stmtFunc cfg = let
+    content = Callable.FunctionContent (Ast.stmtFuncName stmtFunc) cfg
+    in Callable.Function content
 
 lambdaToCallable :: Cfg -> Location -> Callable
 lambdaToCallable cfg location = let
