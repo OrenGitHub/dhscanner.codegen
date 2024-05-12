@@ -57,24 +57,31 @@ createFstringFunc f = let
 createOsPython :: ActualType
 createOsPython = ActualType.ThirdPartyImport $ ActualType.ThirdPartyImportContent "python.os"
 
+createSubprocessPython :: ActualType
+createSubprocessPython = ActualType.ThirdPartyImport $ ActualType.ThirdPartyImportContent "python.subprocess"
+
 runtimeScope :: Scope
 runtimeScope = let
     jsloc = Location "nodejs" 0 0 0 0 -- for native nodejs functions
     pyloc = Location "python" 0 0 0 0 -- for native python functions
     location' = Location "fstring" 0 0 0 0 -- instrumented format string function
-    varNameRequire = Token.VarName (Token.Named "require" jsloc)
-    varNameFstring = Token.VarName (Token.Named "fstring" location')
-    varNameOsPython = Token.VarName (Token.Named "python.os" pyloc)
-    requireSpecialVar = Bitcode.SrcVariableCtor $ Bitcode.SrcVariable (Fqn "nodejs.require") varNameRequire
-    fstringSpecialVar = Bitcode.SrcVariableCtor $ Bitcode.SrcVariable (Fqn "fstring") varNameFstring
-    osPythonVar = Bitcode.SrcVariableCtor $ Bitcode.SrcVariable (Fqn "python.os") varNameOsPython
+    varNameRequire          = Token.VarName (Token.Named "require" jsloc)
+    varNameFstring          = Token.VarName (Token.Named "fstring" location')
+    varNameOsPython         = Token.VarName (Token.Named "python.os" pyloc)
+    varNameSubprocessPython = Token.VarName (Token.Named "python.subprocess" pyloc)
+    requireSpecialVar   = Bitcode.SrcVariableCtor $ Bitcode.SrcVariable (Fqn "nodejs.require")    varNameRequire
+    fstringSpecialVar   = Bitcode.SrcVariableCtor $ Bitcode.SrcVariable (Fqn "fstring")           varNameFstring
+    osPythonVar         = Bitcode.SrcVariableCtor $ Bitcode.SrcVariable (Fqn "python.os")         varNameOsPython
+    subprocessPythonVar = Bitcode.SrcVariableCtor $ Bitcode.SrcVariable (Fqn "python.subprocess") varNameSubprocessPython
     fstringFuncName = Token.FuncName (Token.Named "fstring" location')
     fstringFunc = createFstringFunc fstringFuncName
     osPython = createOsPython
-    require = ("require", (requireSpecialVar, ActualType.Require))
-    fstring = ("fstring", (fstringSpecialVar, fstringFunc))
-    os      = ("os",      (osPythonVar, osPython)) 
-    in Scope $ Data.Map.fromList [ require, fstring, os ]
+    subprocessPython = createSubprocessPython
+    require    = ("require",    (requireSpecialVar,   ActualType.Require))
+    fstring    = ("fstring",    (fstringSpecialVar,   fstringFunc))
+    os         = ("os",         (osPythonVar,         osPython)) 
+    subprocess = ("subprocess", (subprocessPythonVar, subprocessPython)) 
+    in Scope $ Data.Map.fromList [ require, fstring, os, subprocess ]
 
 emptySymbolTable :: SymbolTable
 emptySymbolTable = SymbolTable { scopes = [ runtimeScope ] }
