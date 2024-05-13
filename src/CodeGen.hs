@@ -142,7 +142,7 @@ codeGenStmtIf :: Ast.StmtIfContent -> CodeGenContext Cfg
 codeGenStmtIf stmtIf = do
     cond <- codeGenExp (Ast.stmtIfCond stmtIf)
     thenPart <- codeGenStmts (Ast.stmtIfBody stmtIf)
-    elsePart <- codeGenStmts (Ast.stmtIfBody stmtIf)
+    elsePart <- codeGenStmts (Ast.stmtElseBody stmtIf)
     let assumeIfTaken = assumeIfTakenGen (generatedValue cond) (Ast.stmtIfLocation stmtIf)
     let assumeIfNotTaken = assumeIfNotTakenGen (generatedValue cond) (Ast.stmtIfLocation stmtIf)
     let thenPartCfg = assumeIfTaken `Cfg.concat` thenPart
@@ -169,7 +169,13 @@ codeGenStmtFunc stmtFunc = do
     endScope
     ctx <- get
     let callables' = (decFuncToCallable stmtFunc (Cfg.concat params body)) : (callables ctx)
-    put (ctx { callables = callables' })
+    let funcName = Token.VarName $ Token.getFuncNameToken (Ast.stmtFuncName stmtFunc)
+    let funcFqn = Fqn (Token.content (Token.getVarNameToken funcName))
+    let funcVar = Bitcode.SrcVariableCtor $ Bitcode.SrcVariable funcFqn funcName
+    let funcContent = ActualType.FunctionContent (Ast.stmtFuncName stmtFunc) (ActualType.Params []) ActualType.Any
+    let funcType = ActualType.Function funcContent
+    let symbolTable' = SymbolTable.insertVar funcName funcVar funcType (symbolTable ctx)
+    put (ctx { symbolTable = symbolTable', callables = callables' })
     return $ Cfg.empty (Token.getFuncNameLocation (Ast.stmtFuncName stmtFunc))
 
 codeGenStmtImport :: Ast.StmtImportContent -> CodeGenContext Cfg
@@ -309,7 +315,7 @@ codeGenExpVarSimpleExisting v b t = GeneratedExp (Cfg.empty (Token.getVarNameLoc
 
 codeGenExpVarSimple :: Ast.VarSimpleContent -> CodeGenState -> GeneratedExp
 codeGenExpVarSimple v ctx = case SymbolTable.lookupVar (Ast.varName v) (symbolTable ctx) of
-    Nothing -> codeGenExpVarSimpleMissing (Token.getVarNameLocation (Ast.varName v))
+    Nothing -> nondet (Token.getVarNameLocation (Ast.varName v))
     Just (bitcodeVar, actualType) -> codeGenExpVarSimpleExisting (Ast.varName v) bitcodeVar actualType
 
 getFieldedAccesThirdPartyType :: String -> Token.FieldName -> ActualType
@@ -545,7 +551,7 @@ scriptToCallable cfg = let
 
 decFuncToCallable :: Ast.StmtFuncContent -> Cfg -> Callable
 decFuncToCallable stmtFunc cfg = let
-    content = Callable.FunctionContent (Ast.stmtFuncName stmtFunc) cfg
+    content = Callable.FunctionContent (Ast.stmtFuncName stmtFunc) cfg (Ast.stmtFuncLocation stmtFunc)
     in Callable.Function content
 
 lambdaToCallable :: Cfg -> Location -> Callable
