@@ -27,11 +27,12 @@ import qualified SymbolTable
 
 -- general imports
 import Data.Maybe ( catMaybes )
-
--- general imports
 import Data.List
 import Control.Arrow
 import Control.Monad.State.Lazy
+
+-- general (qualified) imports
+import qualified Data.Map
 
 data CodeGenState
    = CodeGenState
@@ -110,8 +111,27 @@ codeGenStmtsPart stmts = do
 
 -- | TODO: implement me ...
 codeGenDecsPart :: [ Ast.Dec ] -> CodeGenContext ()
-codeGenDecsPart _ = return () -- ignore for now 
+codeGenDecsPart = mapM_ codeGenDec 
 
+codeGenDec :: Ast.Dec -> CodeGenContext ()
+codeGenDec (Ast.DecClass decClass) = codeGenDecClass decClass
+codeGenDec _ = return ()
+
+codeGenDecClass :: Ast.DecClassContent -> CodeGenContext ()
+codeGenDecClass = codeGenDecMethods . Data.Map.elems . Ast.actualMethods . Ast.decClassMethods
+
+codeGenDecMethods :: [ Ast.DecMethodContent ] -> CodeGenContext ()
+codeGenDecMethods = mapM_ codeGenDecMethod
+
+codeGenDecMethod :: Ast.DecMethodContent -> CodeGenContext ()
+codeGenDecMethod decMethod = do
+    beginScope
+    params <- codeGenParams (Ast.decMethodParams decMethod)
+    body <- codeGenStmts (Ast.decMethodBody decMethod)
+    endScope
+    ctx <- get
+    let callables' = (decMethodToCallable decMethod (Cfg.concat params body)) : (callables ctx)
+    put (ctx { callables = callables' })
 
 -- | this function is called in two scenarios:
 --
@@ -553,6 +573,11 @@ decFuncToCallable :: Ast.StmtFuncContent -> Cfg -> Callable
 decFuncToCallable stmtFunc cfg = let
     content = Callable.FunctionContent (Ast.stmtFuncName stmtFunc) cfg (Ast.stmtFuncLocation stmtFunc)
     in Callable.Function content
+
+decMethodToCallable :: Ast.DecMethodContent -> Cfg -> Callable
+decMethodToCallable decMethod cfg = let
+    content = Callable.MethodContent (Ast.decMethodName decMethod) cfg (Ast.decMethodLocation decMethod)
+    in Callable.Method content
 
 lambdaToCallable :: Cfg -> Location -> Callable
 lambdaToCallable cfg location = let
