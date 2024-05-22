@@ -235,8 +235,40 @@ codeGenExp (Ast.ExpInt    expInt    ) = return $ codeGenExpInt expInt -- ctx not
 codeGenExp (Ast.ExpStr    expStr    ) = return $ codeGenExpStr expStr -- ctx not needed
 codeGenExp (Ast.ExpVar    expVar    ) = codeGenExpVar expVar
 codeGenExp (Ast.ExpCall   expCall   ) = codeGenExpCall expCall
+codeGenExp (Ast.ExpField  expField  ) = codeGenExpField expField
+codeGenExp (Ast.ExpBinop  expBinop  ) = codeGenExpBinop expBinop
 codeGenExp (Ast.ExpLambda expLambda ) = codeGenExpLambda expLambda
 codeGenExp _                          = return $ GeneratedExp (Cfg.empty defaultLoc) dummyTmpVar dummyActualType
+
+codeGenExpBinop :: Ast.ExpBinopContent -> CodeGenContext GeneratedExp
+codeGenExpBinop expBinop = do
+    lhs <- codeGenExp (Ast.expBinopLeft expBinop)
+    rhs <- codeGenExp (Ast.expBinopRight expBinop)
+    let location = (Ast.expBinopLocation expBinop)
+    let binopLhs = generatedValue lhs
+    let binopRhs = generatedValue rhs
+    let binopOutput = Bitcode.TmpVariableCtor $ Bitcode.TmpVariable (Fqn "P55") location
+    let binop = Bitcode.BinopContent binopOutput binopLhs binopRhs
+    let content = Bitcode.Binop binop
+    let instruction = Bitcode.Instruction location content
+    let cfg = Cfg.atom (Cfg.Node instruction)
+    let actualType = ActualType.Any
+    let binopCfg = (generatedCfg lhs) `Cfg.concat` (generatedCfg rhs)
+    return $ GeneratedExp (binopCfg `Cfg.concat` cfg) binopOutput actualType
+
+codeGenExpField :: Ast.ExpFieldContent -> CodeGenContext GeneratedExp
+codeGenExpField expField = do
+    lhs <- codeGenExp (Ast.expFieldLhs expField)
+    let location = Ast.expFieldLocation expField
+    let fieldReadInput = (generatedValue lhs)
+    let fieldReadOutput = Bitcode.TmpVariableCtor $ Bitcode.TmpVariable (Fqn "P55") location
+    let fieldReadName = (Ast.expFieldName expField)
+    let fieldRead = Bitcode.FieldReadContent fieldReadOutput fieldReadInput fieldReadName
+    let content = Bitcode.FieldRead fieldRead
+    let instruction = Bitcode.Instruction location content
+    let cfg = Cfg.atom (Cfg.Node instruction)
+    let actualType = ActualType.Any
+    return $ GeneratedExp ((generatedCfg lhs) `Cfg.concat` cfg) fieldReadOutput actualType
 
 -- |
 -- two things happen during codegen of lambdas:
