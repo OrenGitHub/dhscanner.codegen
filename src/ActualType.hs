@@ -154,4 +154,5 @@ data PackageContent
 toFqn :: ActualType -> Fqn
 toFqn (ThirdPartyImport (ThirdPartyImportContent name)) = Fqn name
 toFqn (NativeTypeStr) = Fqn.nativeStr
+toFqn (Class c) = Fqn (Token.content (Token.getClassNameToken (className c)))
 toFqn _ = Fqn.nativeInt

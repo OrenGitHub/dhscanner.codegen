@@ -101,8 +101,11 @@ varExists' s scopes = isJust (lookup' s scopes)
 varExists :: Token.VarName -> SymbolTable -> Bool
 varExists v table = varExists' (Token.content (Token.getVarNameToken v)) (scopes table)
 
-insertVar:: Token.VarName -> Bitcode.Variable -> ActualType -> SymbolTable -> SymbolTable
+insertVar :: Token.VarName -> Bitcode.Variable -> ActualType -> SymbolTable -> SymbolTable
 insertVar name v t = insert (Token.getVarNameToken name) v t
+
+insertClass :: Token.ClassName -> Bitcode.Variable -> ActualType -> SymbolTable -> SymbolTable
+insertClass name v t = insert (Token.getClassNameToken name) v t
 
 insertParam:: Token.ParamName -> Bitcode.Variable -> ActualType -> SymbolTable -> SymbolTable
 insertParam name v t = insert (Token.getParamNameToken name) v t

@@ -32,6 +32,7 @@ import Control.Arrow
 import Control.Monad.State.Lazy
 
 -- general (qualified) imports
+import qualified Data.Set
 import qualified Data.Map
 
 data CodeGenState
@@ -109,7 +110,6 @@ codeGenStmtsPart stmts = do
     let callables' = (scriptToCallable scriptCfg) : (callables ctx) -- combine
     put $ ctx { callables = callables' } -- write back to state
 
--- | TODO: implement me ...
 codeGenDecsPart :: [ Ast.Dec ] -> CodeGenContext ()
 codeGenDecsPart = mapM_ codeGenDec 
 
@@ -118,10 +118,37 @@ codeGenDec (Ast.DecClass decClass) = codeGenDecClass decClass
 codeGenDec _ = return ()
 
 codeGenDecClass :: Ast.DecClassContent -> CodeGenContext ()
-codeGenDecClass = codeGenDecMethods . Data.Map.elems . Ast.actualMethods . Ast.decClassMethods
+codeGenDecClass dec = do
+    beginScope
+    insertSelf (Ast.decClassName dec)
+    codeGenDataMembers (Ast.decClassDataMembers dec)
+    codeGenMethods (Ast.decClassMethods dec)
+    endScope
 
-codeGenDecMethods :: [ Ast.DecMethodContent ] -> CodeGenContext ()
-codeGenDecMethods = mapM_ codeGenDecMethod
+insertSelf :: Token.ClassName -> CodeGenContext ()
+insertSelf className = do
+    ctx <- get
+    let classNameToken = Token.getClassNameToken className
+    let classVarName = Token.VarName classNameToken
+    let classFqn = Fqn (Token.content classNameToken)
+    let selfSrcVar = Bitcode.SrcVariable classFqn classVarName
+    let selfVar = Bitcode.SrcVariableCtor selfSrcVar
+    let emptyDataMembers = ActualType.DataMembers Data.Set.empty
+    let emptyMethods = ActualType.Methods Data.Map.empty
+    let emptySupers = ActualType.Supers Data.Set.empty
+    let actualType = ActualType.Class (ActualType.ClassContent className emptySupers emptyMethods emptyDataMembers)
+    let symbolTable' = SymbolTable.insertClass className selfVar actualType (symbolTable ctx)
+    put $ ctx { symbolTable = symbolTable' }
+    return ()
+
+codeGenMethods :: Ast.Methods -> CodeGenContext ()
+codeGenMethods = codeGenMethods' . Data.Map.elems . Ast.actualMethods
+
+codeGenDataMembers :: Ast.DataMembers -> CodeGenContext ()
+codeGenDataMembers dataMembers = return () -- TODO: implement me ...
+
+codeGenMethods' :: [ Ast.DecMethodContent ] -> CodeGenContext ()
+codeGenMethods' = mapM_ codeGenDecMethod
 
 codeGenDecMethod :: Ast.DecMethodContent -> CodeGenContext ()
 codeGenDecMethod decMethod = do
@@ -251,7 +278,7 @@ codeGenExpBinop expBinop = do
     let location = (Ast.expBinopLocation expBinop)
     let binopLhs = generatedValue lhs
     let binopRhs = generatedValue rhs
-    let binopOutput = Bitcode.TmpVariableCtor $ Bitcode.TmpVariable (Fqn "P55") location
+    let binopOutput = Bitcode.TmpVariableCtor $ Bitcode.TmpVariable (Fqn "MMM") location
     let binop = Bitcode.BinopContent binopOutput binopLhs binopRhs
     let content = Bitcode.Binop binop
     let instruction = Bitcode.Instruction location content
@@ -264,10 +291,12 @@ codeGenExpField :: Ast.ExpFieldContent -> CodeGenContext GeneratedExp
 codeGenExpField expField = do
     lhs <- codeGenExp (Ast.expFieldLhs expField)
     let location = Ast.expFieldLocation expField
+    let lhsFqn = Fqn.content (ActualType.toFqn (inferredActualType lhs))
+    let fieldName = Ast.expFieldName expField
+    let fqn = Fqn (lhsFqn ++ "." ++ (Token.content (Token.getFieldNameToken fieldName)))
     let fieldReadInput = (generatedValue lhs)
-    let fieldReadOutput = Bitcode.TmpVariableCtor $ Bitcode.TmpVariable (Fqn "P55") location
-    let fieldReadName = (Ast.expFieldName expField)
-    let fieldRead = Bitcode.FieldReadContent fieldReadOutput fieldReadInput fieldReadName
+    let fieldReadOutput = Bitcode.TmpVariableCtor $ Bitcode.TmpVariable fqn location
+    let fieldRead = Bitcode.FieldReadContent fieldReadOutput fieldReadInput fieldName
     let content = Bitcode.FieldRead fieldRead
     let instruction = Bitcode.Instruction location content
     let cfg = Cfg.atom (Cfg.Node instruction)
