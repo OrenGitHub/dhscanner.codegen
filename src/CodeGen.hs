@@ -73,7 +73,7 @@ initCodeGenState = CodeGenState {
 
 -- | API: generates code packed as a collection of callables
 codeGen :: Asts -> Callables
-codeGen = Callables . codeGen' . astsContent
+codeGen = Callables . codeGen' . asts
 
 -- | /all/ the files / asts from a given language are handled together
 codeGen' :: [ Ast.Root ] -> [ Callable ]
@@ -151,12 +151,16 @@ codeGenStmts' = mapM codeGenStmt
 -- see `codeGenStmt<TheStatementKindYouWantToInspect>`
 codeGenStmt :: Ast.Stmt -> CodeGenContext Cfg
 codeGenStmt (Ast.StmtIf     stmtIf    ) = codeGenStmtIf stmtIf
+codeGenStmt (Ast.StmtExp    stmtExp   ) = codeGenStmtExp stmtExp
 codeGenStmt (Ast.StmtCall   stmtCall  ) = codeGenStmtCall stmtCall
 codeGenStmt (Ast.StmtFunc   stmtFunc  ) = codeGenStmtFunc stmtFunc
 codeGenStmt (Ast.StmtDecvar stmtDecVar) = codeGenStmtDecvar stmtDecVar
 codeGenStmt (Ast.StmtAssign stmtAssign) = codeGenStmtAssign stmtAssign
 codeGenStmt (Ast.StmtImport stmtImport) = codeGenStmtImport stmtImport
 codeGenStmt _                           = return $ Cfg.empty defaultLoc
+
+codeGenStmtExp :: Ast.Exp -> CodeGenContext Cfg
+codeGenStmtExp e = do { e' <- codeGenExp e; return $ generatedCfg e' }
 
 codeGenStmtIf :: Ast.StmtIfContent -> CodeGenContext Cfg
 codeGenStmtIf stmtIf = do
