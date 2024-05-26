@@ -129,15 +129,15 @@ insertSelf :: Token.ClassName -> CodeGenContext ()
 insertSelf className = do
     ctx <- get
     let classNameToken = Token.getClassNameToken className
-    let classVarName = Token.VarName classNameToken
+    let selfVarName = Token.VarName (Token.Named "self" (Token.location classNameToken))
     let classFqn = Fqn (Token.content classNameToken)
-    let selfSrcVar = Bitcode.SrcVariable classFqn classVarName
+    let selfSrcVar = Bitcode.SrcVariable classFqn selfVarName
     let selfVar = Bitcode.SrcVariableCtor selfSrcVar
     let emptyDataMembers = ActualType.DataMembers Data.Set.empty
     let emptyMethods = ActualType.Methods Data.Map.empty
     let emptySupers = ActualType.Supers Data.Set.empty
     let actualType = ActualType.Class (ActualType.ClassContent className emptySupers emptyMethods emptyDataMembers)
-    let symbolTable' = SymbolTable.insertClass className selfVar actualType (symbolTable ctx)
+    let symbolTable' = SymbolTable.insertVar selfVarName selfVar actualType (symbolTable ctx)
     put $ ctx { symbolTable = symbolTable' }
     return ()
 
