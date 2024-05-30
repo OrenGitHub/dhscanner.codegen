@@ -527,10 +527,31 @@ codeGenStmtAssignToSimpleVar varName init = do
 codeGenStmtAssignToFieldVar :: Ast.VarFieldContent -> Ast.Exp -> CodeGenContext Cfg
 codeGenStmtAssignToFieldVar v e = undefined
 
+codeGenStmtAssignToSubscriptVar :: Ast.VarSubscriptContent -> Ast.Exp -> CodeGenContext Cfg
+codeGenStmtAssignToSubscriptVar subscriptVar value = do
+    value' <- codeGenExp value
+    index <- codeGenExp (Ast.varSubscriptIdx subscriptVar)
+    lhs <- codeGenExp (Ast.ExpVar (Ast.varSubscriptLhs subscriptVar))
+    let valueCfg = generatedCfg value'
+    let indexCfg = generatedCfg index
+    let lhsCfg = generatedCfg lhs
+    let lhsType = inferredActualType lhs
+    let fqn = ActualType.toFqn lhsType
+    let location = Ast.varSubscriptLocation subscriptVar
+    let varName = Token.VarName $ Token.Named (Fqn.content fqn) location
+    let output = Bitcode.SrcVariableCtor $ Bitcode.SrcVariable fqn varName
+    let subscriptIdx = generatedValue index
+    let input = generatedValue value'
+    let content = Bitcode.SubscriptWriteContent output subscriptIdx input
+    let subscriptWrite = Bitcode.SubscriptWrite content
+    let instruction = Bitcode.Instruction location subscriptWrite
+    let cfg = valueCfg `Cfg.concat` indexCfg `Cfg.concat` lhsCfg 
+    return $ cfg `Cfg.concat` (Cfg.atom (Cfg.Node instruction))
+
 codeGenStmtAssign' :: Ast.Var -> Ast.Exp -> CodeGenContext Cfg
 codeGenStmtAssign' (Ast.VarSimple    v) e = codeGenStmtAssignToSimpleVar (Ast.varName v) e
 codeGenStmtAssign' (Ast.VarField     v) e = codeGenStmtAssignToFieldVar v e
-codeGenStmtAssign' _ _ = undefined -- codeGenStmtAssignToSubscriptVar v e
+codeGenStmtAssign' (Ast.VarSubscript v) e = codeGenStmtAssignToSubscriptVar v e
 
 -- | dynamic languages often have variable declarations
 -- "hide" in plain assignment syntax - this means that
