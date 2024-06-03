@@ -269,7 +269,26 @@ codeGenExp (Ast.ExpCall   expCall   ) = codeGenExpCall expCall
 codeGenExp (Ast.ExpField  expField  ) = codeGenExpField expField
 codeGenExp (Ast.ExpBinop  expBinop  ) = codeGenExpBinop expBinop
 codeGenExp (Ast.ExpLambda expLambda ) = codeGenExpLambda expLambda
+codeGenExp (Ast.ExpSubscript expSbs ) = codeGenExpSubscript expSbs
 codeGenExp _                          = return $ GeneratedExp (Cfg.empty defaultLoc) dummyTmpVar dummyActualType
+
+codeGenExpSubscript :: Ast.ExpSubscriptContent -> CodeGenContext GeneratedExp
+codeGenExpSubscript expSubscript = do
+    lhs <- codeGenExp (Ast.expSubscriptLhs expSubscript)
+    index <- codeGenExp (Ast.expSubscriptIdx expSubscript)
+    let location = Ast.expSubscriptLocation expSubscript
+    let lhsCfg = generatedCfg lhs
+    let indexCfg = generatedCfg index
+    let lhsValue = generatedValue lhs
+    let indexValue = generatedValue index
+    let lhsActualType = inferredActualType lhs
+    let lhsFqn = ActualType.toFqn lhsActualType
+    let output = Bitcode.TmpVariableCtor $ Bitcode.TmpVariable lhsFqn location 
+    let content = Bitcode.SubscriptReadContent output lhsValue indexValue
+    let subscriptRead = Bitcode.SubscriptRead content
+    let instruction = Bitcode.Instruction location subscriptRead
+    let cfg = Cfg.atom (Cfg.Node instruction)
+    return $ GeneratedExp (indexCfg `Cfg.concat` lhsCfg `Cfg.concat` cfg) output lhsActualType
 
 codeGenExpBinop :: Ast.ExpBinopContent -> CodeGenContext GeneratedExp
 codeGenExpBinop expBinop = do
