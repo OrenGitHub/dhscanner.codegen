@@ -686,9 +686,10 @@ decFuncToCallable stmtFunc cfg = let
 decMethodToCallable :: Ast.DecMethodContent -> Cfg -> Callable
 decMethodToCallable decMethod cfg = let
     hostingClassName = Ast.hostingClassName decMethod
+    hostingClassSupers = Ast.hostingClassSupers decMethod
     decMethodName = Ast.decMethodName decMethod
     location = Ast.decMethodLocation decMethod
-    content = Callable.MethodContent decMethodName hostingClassName cfg location
+    content = Callable.MethodContent decMethodName hostingClassName hostingClassSupers cfg location
     in Callable.Method content
 
 lambdaToCallable :: Cfg -> Location -> Callable
