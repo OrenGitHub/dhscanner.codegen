@@ -392,15 +392,19 @@ nondet location = let
 -- does not exist in the symbol table. this is (probably? surely?) an error.
 -- best thing we can do is use some universal variable to capture all
 -- the missing variables
-codeGenExpVarSimpleMissing :: Location -> GeneratedExp
-codeGenExpVarSimpleMissing = nondet
+codeGenExpVarSimpleMissing :: Token.VarName -> GeneratedExp
+codeGenExpVarSimpleMissing v = let
+    generatedExp = nondet (Token.getVarNameLocation v)
+    content = ActualType.ThirdPartyImportContent (Token.content (Token.getVarNameToken v))
+    actualType = ActualType.ThirdPartyImport content
+    in generatedExp { inferredActualType = actualType }
 
 codeGenExpVarSimpleExisting :: Token.VarName -> Bitcode.Variable -> ActualType -> GeneratedExp
 codeGenExpVarSimpleExisting v b t = GeneratedExp (Cfg.empty (Token.getVarNameLocation v)) b t 
 
 codeGenExpVarSimple :: Ast.VarSimpleContent -> CodeGenState -> GeneratedExp
 codeGenExpVarSimple v ctx = case SymbolTable.lookupVar (Ast.varName v) (symbolTable ctx) of
-    Nothing -> nondet (Token.getVarNameLocation (Ast.varName v))
+    Nothing -> codeGenExpVarSimpleMissing (Ast.varName v)
     Just (bitcodeVar, actualType) -> codeGenExpVarSimpleExisting (Ast.varName v) bitcodeVar actualType
 
 getFieldedAccesThirdPartyType :: String -> Token.FieldName -> ActualType
