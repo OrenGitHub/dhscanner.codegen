@@ -455,11 +455,31 @@ codeGenExpVarField v = do
     let cfg = cfgLhsExpVar `Cfg.concat` cfgFieldRead
     return $ GeneratedExp cfg output actualType'
 
+codeGenExpVarSubscript :: Ast.VarSubscriptContent -> CodeGenContext GeneratedExp
+codeGenExpVarSubscript v = do
+    v' <- codeGenExp (Ast.ExpVar (Ast.varSubscriptLhs v))
+    i' <- codeGenExp (Ast.varSubscriptIdx v)
+    let cfgLhs = generatedCfg v'
+    let cfgIdx = generatedCfg i'
+    let input = generatedValue v'
+    let index = generatedValue i'
+    let actualType = inferredActualType v'
+    let inputFqn = Bitcode.variableFqn input
+    let outputFqn = ActualType.toFqn actualType
+    let location = Ast.varSubscriptLocation v
+    let output = Bitcode.TmpVariableCtor (Bitcode.TmpVariable outputFqn location)
+    let subscriptReadContent = Bitcode.SubscriptReadContent output input index
+    let subscriptRead = Bitcode.SubscriptRead subscriptReadContent
+    let subscriptReadInstruction = Bitcode.Instruction location subscriptRead
+    let cfgSubscriptRead = Cfg.atom (Cfg.Node subscriptReadInstruction)
+    let cfg = cfgIdx `Cfg.concat` cfgLhs `Cfg.concat` cfgSubscriptRead
+    return $ GeneratedExp cfg output actualType
+
 -- | dispatch codegen (exp) var handlers
 codeGenExpVar :: Ast.ExpVarContent -> CodeGenContext GeneratedExp
 codeGenExpVar (Ast.ExpVarContent (Ast.VarSimple    v)) = do { ctx <- get; return $ codeGenExpVarSimple v ctx }
 codeGenExpVar (Ast.ExpVarContent (Ast.VarField     v)) = codeGenExpVarField v
-codeGenExpVar (Ast.ExpVarContent (Ast.VarSubscript v)) = undefined -- codeGenExpVarSubscript v ctx
+codeGenExpVar (Ast.ExpVarContent (Ast.VarSubscript v)) = codeGenExpVarSubscript v
 
 -- | code gen exps ( plural )
 codeGenExps :: [ Ast.Exp ] -> CodeGenContext [ GeneratedExp ] 
