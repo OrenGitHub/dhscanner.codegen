@@ -212,14 +212,25 @@ assumeIfNotTakenGen cond loc = let
     instruction = Bitcode.Instruction loc content
     in Cfg.atom (Cfg.Node instruction)
 
+codeGenAnnotations :: [ Ast.Exp ] -> CodeGenContext [ Callable.Annotation ]
+codeGenAnnotations = mapM codeGenAnnotation
+
+codeGenAnnotation :: Ast.Exp -> CodeGenContext Callable.Annotation
+codeGenAnnotation exp = do
+    exp' <- codeGenExp exp
+    let fqn = ActualType.toFqn (inferredActualType exp')
+    return $ Callable.Annotation (Fqn.content fqn) []
+
 codeGenStmtFunc :: Ast.StmtFuncContent -> CodeGenContext Cfg
 codeGenStmtFunc stmtFunc = do
+    annotations <- codeGenAnnotations (Ast.stmtFuncAnnotations stmtFunc)
     beginScope
     params <- codeGenParams (Ast.stmtFuncParams stmtFunc)
     body <- codeGenStmts (Ast.stmtFuncBody stmtFunc)
     endScope
     ctx <- get
-    let callables' = (decFuncToCallable stmtFunc (Cfg.concat params body)) : (callables ctx)
+    let callable = decFuncToCallable stmtFunc (Cfg.concat params body) annotations
+    let callables' = callable : (callables ctx)
     let funcName = Token.VarName $ Token.getFuncNameToken (Ast.stmtFuncName stmtFunc)
     let funcFqn = Fqn (Token.content (Token.getVarNameToken funcName))
     let funcVar = Bitcode.SrcVariableCtor $ Bitcode.SrcVariable funcFqn funcName
@@ -698,9 +709,9 @@ scriptToCallable cfg = let
     content = Callable.ScriptContent filename cfg
     in Callable.Script content
 
-decFuncToCallable :: Ast.StmtFuncContent -> Cfg -> Callable
-decFuncToCallable stmtFunc cfg = let
-    content = Callable.FunctionContent (Ast.stmtFuncName stmtFunc) cfg (Ast.stmtFuncLocation stmtFunc)
+decFuncToCallable :: Ast.StmtFuncContent -> Cfg -> [ Callable.Annotation ] -> Callable
+decFuncToCallable stmtFunc cfg annotations = let
+    content = Callable.FunctionContent (Ast.stmtFuncName stmtFunc) cfg annotations (Ast.stmtFuncLocation stmtFunc)
     in Callable.Function content
 
 decMethodToCallable :: Ast.DecMethodContent -> Cfg -> Callable
