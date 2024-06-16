@@ -1,4 +1,4 @@
-FROM haskell
+FROM haskell:9.8.1
 RUN cabal update
 RUN apt-get update
 RUN apt-get install vim -y
