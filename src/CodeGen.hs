@@ -184,10 +184,24 @@ codeGenStmt (Ast.StmtFunc   stmtFunc  ) = codeGenStmtFunc stmtFunc
 codeGenStmt (Ast.StmtDecvar stmtDecVar) = codeGenStmtDecvar stmtDecVar
 codeGenStmt (Ast.StmtAssign stmtAssign) = codeGenStmtAssign stmtAssign
 codeGenStmt (Ast.StmtImport stmtImport) = codeGenStmtImport stmtImport
+codeGenStmt (Ast.StmtReturn stmtReturn) = codeGenStmtReturn stmtReturn
 codeGenStmt _                           = return $ Cfg.empty defaultLoc
 
 codeGenStmtExp :: Ast.Exp -> CodeGenContext Cfg
 codeGenStmtExp e = do { e' <- codeGenExp e; return $ generatedCfg e' }
+
+codeGenStmtReturnNothing :: Ast.StmtReturnContent -> CodeGenContext Cfg
+codeGenStmtReturnNothing stmtReturn = return $ Cfg.empty (Ast.stmtReturnLocation stmtReturn)
+
+codeGenStmtReturnValue :: Ast.Exp -> CodeGenContext Cfg
+codeGenStmtReturnValue exp = do
+    returnValue <- codeGenExp exp
+    return $ generatedCfg returnValue
+
+codeGenStmtReturn :: Ast.StmtReturnContent -> CodeGenContext Cfg
+codeGenStmtReturn stmtReturn = case (Ast.stmtReturnValue stmtReturn) of
+    Nothing -> codeGenStmtReturnNothing stmtReturn
+    Just returnedValue -> codeGenStmtReturnValue returnedValue
 
 codeGenStmtIf :: Ast.StmtIfContent -> CodeGenContext Cfg
 codeGenStmtIf stmtIf = do
