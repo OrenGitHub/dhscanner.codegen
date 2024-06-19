@@ -593,7 +593,20 @@ codeGenStmtAssignToSimpleVar varName init = do
     return $ initCfg `Cfg.concat` (createAssignCfg location srcVariable initVariable)
     
 codeGenStmtAssignToFieldVar :: Ast.VarFieldContent -> Ast.Exp -> CodeGenContext Cfg
-codeGenStmtAssignToFieldVar v e = undefined
+codeGenStmtAssignToFieldVar var exp = do
+    exp' <- codeGenExp exp
+    var' <- codeGenExp (Ast.ExpVar (Ast.varFieldLhs var))
+    let location = Ast.varFieldLocation var
+    let lhsVar = generatedValue var'
+    let expVar = generatedValue exp'
+    let fieldName = Ast.varFieldName var
+    let content = Bitcode.FieldWriteContent lhsVar fieldName expVar
+    let fieldWrite = Bitcode.FieldWrite content
+    let instruction = Bitcode.Instruction location fieldWrite
+    let expCfg = generatedCfg exp'
+    let varCfg = generatedCfg var'
+    let cfg = Cfg.atom (Cfg.Node instruction)
+    return $ expCfg `Cfg.concat` varCfg `Cfg.concat` cfg
 
 codeGenStmtAssignToSubscriptVar :: Ast.VarSubscriptContent -> Ast.Exp -> CodeGenContext Cfg
 codeGenStmtAssignToSubscriptVar subscriptVar value = do
