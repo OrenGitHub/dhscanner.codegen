@@ -335,16 +335,16 @@ codeGenExpField :: Ast.ExpFieldContent -> CodeGenContext GeneratedExp
 codeGenExpField expField = do
     lhs <- codeGenExp (Ast.expFieldLhs expField)
     let location = Ast.expFieldLocation expField
-    let lhsFqn = Fqn.content (ActualType.toFqn (inferredActualType lhs))
+    let lhsType = inferredActualType lhs
     let fieldName = Ast.expFieldName expField
-    let fqn = Fqn (lhsFqn ++ "." ++ (Token.content (Token.getFieldNameToken fieldName)))
+    let actualType = ActualType.getFieldedAccess lhsType fieldName
+    let fqn = ActualType.toFqn actualType
     let fieldReadInput = (generatedValue lhs)
     let fieldReadOutput = Bitcode.TmpVariableCtor $ Bitcode.TmpVariable fqn location
     let fieldRead = Bitcode.FieldReadContent fieldReadOutput fieldReadInput fieldName
     let content = Bitcode.FieldRead fieldRead
     let instruction = Bitcode.Instruction location content
     let cfg = Cfg.atom (Cfg.Node instruction)
-    let actualType = ActualType.Any
     return $ GeneratedExp ((generatedCfg lhs) `Cfg.concat` cfg) fieldReadOutput actualType
 
 -- |
@@ -467,7 +467,7 @@ codeGenExpVarField v = do
     let cfgLhsExpVar = generatedCfg v'
     let input = generatedValue v'
     let actualType = inferredActualType v'
-    let actualType' = getFieldedAccess actualType fieldName
+    let actualType' = ActualType.getFieldedAccess actualType fieldName
     let inputFqn = Bitcode.variableFqn input
     let fieldNameContent = Token.content (Token.getFieldNameToken fieldName)
     let outputFqn = ActualType.toFqn actualType'

@@ -151,6 +151,13 @@ data PackageContent
      }
      deriving ( Show, Eq, Ord, Generic )
 
+getFieldedAccess :: ActualType -> Token.FieldName -> ActualType
+getFieldedAccess t f = let
+    f' = Token.content (Token.getFieldNameToken f)
+    t' = Fqn.content (toFqn t)
+    content = ThirdPartyImportContent (t' ++ "." ++ f')
+    in ThirdPartyImport content
+
 toFqn :: ActualType -> Fqn
 toFqn (ThirdPartyImport (ThirdPartyImportContent name)) = Fqn name
 toFqn (NativeTypeStr) = Fqn.nativeStr
