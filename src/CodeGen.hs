@@ -248,7 +248,7 @@ codeGenStmtFunc stmtFunc = do
     let funcName = Token.VarName $ Token.getFuncNameToken (Ast.stmtFuncName stmtFunc)
     let funcFqn = Fqn (Token.content (Token.getVarNameToken funcName))
     let funcVar = Bitcode.SrcVariableCtor $ Bitcode.SrcVariable funcFqn funcName
-    let funcContent = ActualType.FunctionContent (Ast.stmtFuncName stmtFunc) (ActualType.Params []) ActualType.Any
+    let funcContent = ActualType.FunctionContent (Ast.stmtFuncName stmtFunc) (ActualType.Params []) someType
     let funcType = ActualType.Function funcContent
     let symbolTable' = SymbolTable.insertVar funcName funcVar funcType (symbolTable ctx)
     put (ctx { symbolTable = symbolTable', callables = callables' })
@@ -277,7 +277,7 @@ dummyTmpVar :: Bitcode.Variable
 dummyTmpVar = Bitcode.TmpVariableCtor $ Bitcode.TmpVariable Fqn.nativeInt defaultLoc
 
 dummyActualType :: ActualType
-dummyActualType = ActualType.Any
+dummyActualType = someType
 
 -- | in fact, stmt call only wraps an expression call,
 -- whose value doesn't get assigned anywhere ... it's really
@@ -327,7 +327,7 @@ codeGenExpBinop expBinop = do
     let content = Bitcode.Binop binop
     let instruction = Bitcode.Instruction location content
     let cfg = Cfg.atom (Cfg.Node instruction)
-    let actualType = ActualType.Any
+    let actualType = someType
     let binopCfg = (generatedCfg lhs) `Cfg.concat` (generatedCfg rhs)
     return $ GeneratedExp (binopCfg `Cfg.concat` cfg) binopOutput actualType
 
@@ -421,24 +421,32 @@ codeGenExpLambda' expLambda = do
 
 -- | whenever something goes wrong, or simply not supported
 -- we can generate a non deterministic expression
-nondet :: Location -> GeneratedExp
-nondet location = let
+nondet :: Token.VarName -> GeneratedExp
+nondet varName = let
+    location = Token.getVarNameLocation varName
+    rawName = Token.content (Token.getVarNameToken varName)
     nondetFunc = Token.VarName (Token.Named "nondet" location)
     arbitraryValue = Token.VarName (Token.Named "arbitrary_value" location)
-    callee = Bitcode.SrcVariableCtor $ Bitcode.SrcVariable Fqn.any nondetFunc
-    output = Bitcode.SrcVariableCtor $ Bitcode.SrcVariable Fqn.any arbitraryValue
+    callee = Bitcode.SrcVariableCtor $ Bitcode.SrcVariable Fqn.nativeStr nondetFunc
+    output = Bitcode.SrcVariableCtor $ Bitcode.SrcVariable (Fqn rawName) arbitraryValue
     call = Bitcode.Call (Bitcode.CallContent output callee [] location)
     instruction = Bitcode.Instruction location call
     cfg = Cfg.atom (Cfg.Node instruction)
-    in GeneratedExp cfg output ActualType.Any 
+    in GeneratedExp cfg output (ActualType.ThirdPartyImport (ActualType.ThirdPartyImportContent "KOKO77777"))
+
+someType :: ActualType
+someType = ActualType.ThirdPartyImport (ActualType.ThirdPartyImportContent "KOKO77777")
 
 -- | for some reason, the variable needed to generate an exp
 -- does not exist in the symbol table. this is (probably? surely?) an error.
+--
+-- EDIT: This is NOT an error - it is perfectly fine ...
+--
 -- best thing we can do is use some universal variable to capture all
 -- the missing variables
 codeGenExpVarSimpleMissing :: Token.VarName -> GeneratedExp
 codeGenExpVarSimpleMissing v = let
-    generatedExp = nondet (Token.getVarNameLocation v)
+    generatedExp = nondet v
     content = ActualType.ThirdPartyImportContent (Token.content (Token.getVarNameToken v))
     actualType = ActualType.ThirdPartyImport content
     in generatedExp { inferredActualType = actualType }
@@ -516,13 +524,13 @@ thirdPartyContent = ActualType.ThirdPartyImport . ActualType.ThirdPartyImportCon
 -- | handle special javascript call: `require`
 getReturnActualType' :: Args -> ActualType
 getReturnActualType' [(GeneratedExp _ _ (NativeTypeConstStr value))] = thirdPartyContent ("npm." ++ value)
-getReturnActualType' _ = ActualType.Any
+getReturnActualType' _ = someType
 
 -- | normal case currently ignores overloading
 getReturnActualType'' :: Callee -> ActualType
 getReturnActualType'' (GeneratedExp _ _ (ActualType.Function f)) = (ActualType.returnType f)
 getReturnActualType'' (GeneratedExp _ _ (ActualType.ThirdPartyImport i)) = (ActualType.ThirdPartyImport i)
-getReturnActualType'' _ = ActualType.Any
+getReturnActualType'' (GeneratedExp _ _ actualType) = ActualType.ThirdPartyImport (ThirdPartyImportContent "MOMO66")
 
 -- | separate javascript `require` calls
 getReturnActualType :: Callee -> Args -> ActualType
@@ -559,7 +567,7 @@ createBitcodeVarIfNeeded :: Ast.VarSimpleContent -> CodeGenContext ()
 createBitcodeVarIfNeeded v = do { ctx <- get; put $ let 
     bitcodeVar = Bitcode.SrcVariableCtor (Bitcode.SrcVariable Fqn.nativeInt (Ast.varName v))
     bitcodeVarExists = SymbolTable.varExists (Ast.varName v) (symbolTable ctx)
-    symbolTable' = SymbolTable.insertVar (Ast.varName v) bitcodeVar ActualType.Any (symbolTable ctx)
+    symbolTable' = SymbolTable.insertVar (Ast.varName v) bitcodeVar someType (symbolTable ctx)
     in case bitcodeVarExists of { True -> ctx; False -> ctx { symbolTable = symbolTable' } }
 }
 
