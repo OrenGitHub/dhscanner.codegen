@@ -6,6 +6,9 @@
 {-# LANGUAGE DeriveAnyClass    #-}
 {-# LANGUAGE OverloadedStrings #-}
 
+{-# OPTIONS -Wno-unused-matches   #-}
+{-# OPTIONS -Wno-unused-top-binds #-}
+
 import Yesod
 import Prelude
 import Data.Aeson()
@@ -35,8 +38,8 @@ getHealthcheckR = returnJson $ Healthy True
 
 postHomeR :: Handler Value
 postHomeR = do
-    asts <- requireCheckJsonBody :: Handler Asts
-    returnJson $ codeGen asts
+    _asts <- requireCheckJsonBody :: Handler Asts
+    returnJson $ codeGen _asts
 
 main :: IO ()
 main = warp 3000 App
