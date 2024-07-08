@@ -45,13 +45,13 @@ beginScope = SymbolTable . (newEmptyScope:) . scopes
 
 -- | It is ther user's responsibility that `beginScope` is coupled with its `endScope`
 endScope :: SymbolTable -> SymbolTable
-endScope = SymbolTable . tail . scopes
+endScope table = case scopes table of { (_:outerScopes) -> SymbolTable outerScopes; [] -> table }
 
 createFstringFunc :: Token.FuncName -> ActualType
 createFstringFunc f = let
-    params = ActualType.Params [] -- ignore the params, they are irrelevant
+    irrelevantParams = ActualType.Params []
     strRetType = ActualType.NativeTypeStr
-    f' = ActualType.FunctionContent f params strRetType
+    f' = ActualType.FunctionContent f irrelevantParams strRetType
     in ActualType.Function f'
 
 createOsPython :: ActualType
@@ -87,15 +87,15 @@ emptySymbolTable :: SymbolTable
 emptySymbolTable = SymbolTable { scopes = [ runtimeScope ] }
 
 insert' :: String -> Bitcode.Variable -> ActualType -> Scope -> Scope
-insert' content b t (Scope s) = Scope $ Data.Map.insert content (b,t) s
+insert' content' b t (Scope s) = Scope $ Data.Map.insert content' (b,t) s
 
 insert :: Token.Named -> Bitcode.Variable -> ActualType -> SymbolTable -> SymbolTable
 insert _ _ _ (SymbolTable []) = SymbolTable [] -- unreachable
-insert name bitcodeVar actualType (SymbolTable (scope:externalScopes)) = SymbolTable scopes
-    where scopes = (insert' (Token.content name) bitcodeVar actualType scope):externalScopes
+insert name bitcodeVar actualType (SymbolTable (scope:externalScopes)) = SymbolTable scopes'
+    where scopes' = (insert' (Token.content name) bitcodeVar actualType scope):externalScopes
 
 varExists' :: String -> [ Scope ] -> Bool
-varExists' s scopes = isJust (lookup' s scopes)
+varExists' s scopes' = isJust (lookup' s scopes')
 
 -- | 
 varExists :: Token.VarName -> SymbolTable -> Bool

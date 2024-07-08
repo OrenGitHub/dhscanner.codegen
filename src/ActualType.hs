@@ -7,8 +7,9 @@ where
 
 -- project imports
 import Fqn
+
+-- project (qualified) imports
 import Location
-import qualified Ast
 import qualified Token
 
 -- general imports
@@ -16,9 +17,7 @@ import Data.Map ( Map )
 import Data.Set ( Set )
 
 -- general (qualified) imports
-import Data.Aeson
 import GHC.Generics
-import qualified Data.Map
 
 data ActualType
    = Any
@@ -155,8 +154,8 @@ getFieldedAccess :: ActualType -> Token.FieldName -> ActualType
 getFieldedAccess t f = let
     f' = Token.content (Token.getFieldNameToken f)
     t' = Fqn.content (toFqn t)
-    content = ThirdPartyImportContent (t' ++ "." ++ f')
-    in ThirdPartyImport content
+    thirdPartyImportContent = ThirdPartyImportContent (t' ++ "." ++ f')
+    in ThirdPartyImport thirdPartyImportContent
 
 toFqn :: ActualType -> Fqn
 toFqn (ThirdPartyImport (ThirdPartyImportContent name)) = Fqn name
