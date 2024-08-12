@@ -1,6 +1,0 @@
-[submodule "dhscanner.ast"]
-	path = dhscanner.ast
-	url = https://github.com/OrenGitHub/dhscanner.ast
-[submodule "dhscanner.bitcode"]
-	path = dhscanner.bitcode
-	url = https://github.com/OrenGitHub/dhscanner.bitcode
