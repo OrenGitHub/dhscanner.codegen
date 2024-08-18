@@ -1,0 +1,4 @@
+FROM haskell:9.4.8
+RUN wget https://github.com/OrenGitHub/dhscanner.codegen/releases/download/v0.0.5/codegen.aarch64
+RUN chmod +x codegen.aarch64
+CMD ["./codegen.aarch64"]

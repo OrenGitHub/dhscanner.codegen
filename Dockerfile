@@ -1,4 +1,4 @@
-FROM haskell:9.4.7
+FROM haskell:9.4.8
 RUN apt-get update
 RUN apt-get install vim -y
 RUN echo "set number" > ~/.vimrc
