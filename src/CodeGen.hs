@@ -286,29 +286,9 @@ codeGenExp (Ast.ExpInt    expInt    ) = return $ codeGenExpInt expInt -- ctx not
 codeGenExp (Ast.ExpStr    expStr    ) = return $ codeGenExpStr expStr -- ctx not needed
 codeGenExp (Ast.ExpVar    expVar    ) = codeGenExpVar expVar
 codeGenExp (Ast.ExpCall   expCall   ) = codeGenExpCall expCall
-codeGenExp (Ast.ExpField  expField  ) = codeGenExpField expField
 codeGenExp (Ast.ExpBinop  expBinop  ) = codeGenExpBinop expBinop
 codeGenExp (Ast.ExpLambda expLambda ) = codeGenExpLambda expLambda
-codeGenExp (Ast.ExpSubscript expSbs ) = codeGenExpSubscript expSbs
 codeGenExp _                          = return $ GeneratedExp (Cfg.empty defaultLoc) dummyTmpVar dummyActualType
-
-codeGenExpSubscript :: Ast.ExpSubscriptContent -> CodeGenContext GeneratedExp
-codeGenExpSubscript expSubscript = do
-    lhs <- codeGenExp (Ast.expSubscriptLhs expSubscript)
-    index <- codeGenExp (Ast.expSubscriptIdx expSubscript)
-    let location' = Ast.expSubscriptLocation expSubscript
-    let lhsCfg = generatedCfg lhs
-    let indexCfg = generatedCfg index
-    let lhsValue = generatedValue lhs
-    let indexValue = generatedValue index
-    let lhsActualType = inferredActualType lhs
-    let lhsFqn = ActualType.toFqn lhsActualType
-    let output = Bitcode.TmpVariableCtor $ Bitcode.TmpVariable lhsFqn location'
-    let content' = Bitcode.SubscriptReadContent output lhsValue indexValue
-    let subscriptRead = Bitcode.SubscriptRead content'
-    let instruction = Bitcode.Instruction location' subscriptRead
-    let cfg = Cfg.atom (Cfg.Node instruction)
-    return $ GeneratedExp (indexCfg `Cfg.concat` lhsCfg `Cfg.concat` cfg) output lhsActualType
 
 codeGenExpBinop :: Ast.ExpBinopContent -> CodeGenContext GeneratedExp
 codeGenExpBinop expBinop = do
@@ -325,22 +305,6 @@ codeGenExpBinop expBinop = do
     let actualType = someType
     let binopCfg = (generatedCfg lhs) `Cfg.concat` (generatedCfg rhs)
     return $ GeneratedExp (binopCfg `Cfg.concat` cfg) binopOutput actualType
-
-codeGenExpField :: Ast.ExpFieldContent -> CodeGenContext GeneratedExp
-codeGenExpField expField = do
-    lhs <- codeGenExp (Ast.expFieldLhs expField)
-    let location' = Ast.expFieldLocation expField
-    let lhsType = inferredActualType lhs
-    let fieldName = Ast.expFieldName expField
-    let actualType = ActualType.getFieldedAccess lhsType fieldName
-    let fqn = ActualType.toFqn actualType
-    let fieldReadInput = (generatedValue lhs)
-    let fieldReadOutput = Bitcode.TmpVariableCtor $ Bitcode.TmpVariable fqn location'
-    let fieldRead = Bitcode.FieldReadContent fieldReadOutput fieldReadInput fieldName
-    let content' = Bitcode.FieldRead fieldRead
-    let instruction = Bitcode.Instruction location' content'
-    let cfg = Cfg.atom (Cfg.Node instruction)
-    return $ GeneratedExp ((generatedCfg lhs) `Cfg.concat` cfg) fieldReadOutput actualType
 
 -- |
 -- two things happen during codegen of lambdas:
@@ -465,7 +429,7 @@ getFieldedAccess actualType _ = actualType
 
 codeGenExpVarField :: Ast.VarFieldContent -> CodeGenContext GeneratedExp
 codeGenExpVarField v = do
-    v' <- codeGenExp (Ast.ExpVar (Ast.varFieldLhs v))
+    v' <- codeGenExp (Ast.varFieldLhs v)
     let fieldName = Ast.varFieldName v
     let cfgLhsExpVar = generatedCfg v'
     let input = generatedValue v'
@@ -483,7 +447,7 @@ codeGenExpVarField v = do
 
 codeGenExpVarSubscript :: Ast.VarSubscriptContent -> CodeGenContext GeneratedExp
 codeGenExpVarSubscript v = do
-    v' <- codeGenExp (Ast.ExpVar (Ast.varSubscriptLhs v))
+    v' <- codeGenExp (Ast.varSubscriptLhs v)
     i' <- codeGenExp (Ast.varSubscriptIdx v)
     let cfgLhs = generatedCfg v'
     let cfgIdx = generatedCfg i'
@@ -595,7 +559,7 @@ codeGenStmtAssignToSimpleVar varName init = do
 codeGenStmtAssignToFieldVar :: Ast.VarFieldContent -> Ast.Exp -> CodeGenContext Cfg
 codeGenStmtAssignToFieldVar var exp = do
     exp' <- codeGenExp exp
-    var' <- codeGenExp (Ast.ExpVar (Ast.varFieldLhs var))
+    var' <- codeGenExp (Ast.varFieldLhs var)
     let location' = Ast.varFieldLocation var
     let lhsVar = generatedValue var'
     let expVar = generatedValue exp'
@@ -612,7 +576,7 @@ codeGenStmtAssignToSubscriptVar :: Ast.VarSubscriptContent -> Ast.Exp -> CodeGen
 codeGenStmtAssignToSubscriptVar subscriptVar value = do
     value' <- codeGenExp value
     index <- codeGenExp (Ast.varSubscriptIdx subscriptVar)
-    lhs <- codeGenExp (Ast.ExpVar (Ast.varSubscriptLhs subscriptVar))
+    lhs <- codeGenExp (Ast.varSubscriptLhs subscriptVar)
     let valueCfg = generatedCfg value'
     let indexCfg = generatedCfg index
     let lhsCfg = generatedCfg lhs
