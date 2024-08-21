@@ -111,6 +111,7 @@ codeGenDecsPart = mapM_ codeGenDec
 
 codeGenDec :: Ast.Dec -> CodeGenContext ()
 codeGenDec (Ast.DecClass decClass) = codeGenDecClass decClass
+codeGenDec (Ast.DecMethod decMethod) = codeGenDecMethod decMethod
 codeGenDec _ = return ()
 
 codeGenDecClass :: Ast.DecClassContent -> CodeGenContext ()
