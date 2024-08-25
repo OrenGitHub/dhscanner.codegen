@@ -88,7 +88,7 @@ codeGenRoots = mapM_ codeGenRoot
 -- * declarations are handled second
 --
 codeGenRoot :: Ast.Root -> CodeGenContext ()
-codeGenRoot ast = do { codeGenStmtsPart (Ast.stmts ast); codeGenDecsPart (Ast.decs ast) }
+codeGenRoot = codeGenStmtsPart . Ast.stmts
 
 -- |
 -- traversing the statements of the file has 2 effects:
@@ -106,21 +106,14 @@ codeGenStmtsPart stmts = do
     let callables' = (scriptToCallable scriptCfg) : (callables ctx) -- combine
     put $ ctx { callables = callables' } -- write back to state
 
-codeGenDecsPart :: [ Ast.Dec ] -> CodeGenContext ()
-codeGenDecsPart = mapM_ codeGenDec 
-
-codeGenDec :: Ast.Dec -> CodeGenContext ()
-codeGenDec (Ast.DecClass decClass) = codeGenDecClass decClass
-codeGenDec (Ast.DecMethod decMethod) = codeGenDecMethod decMethod
-codeGenDec _ = return ()
-
-codeGenDecClass :: Ast.DecClassContent -> CodeGenContext ()
-codeGenDecClass dec = do
+codeGenStmtClass :: Ast.StmtClassContent -> CodeGenContext Cfg
+codeGenStmtClass stmtClass = do
     beginScope
-    insertSelf (Ast.decClassName dec)
-    codeGenDataMembers (Ast.decClassDataMembers dec)
-    codeGenMethods (Ast.decClassMethods dec)
+    insertSelf (Ast.stmtClassName stmtClass)
+    codeGenDataMembers (Ast.stmtClassDataMembers stmtClass)
+    codeGenMethods (Ast.stmtClassMethods stmtClass)
     endScope
+    return $ Cfg.empty defaultLoc
 
 insertSelf :: Token.ClassName -> CodeGenContext ()
 insertSelf className' = do
@@ -144,17 +137,17 @@ codeGenMethods = codeGenMethods' . Data.Map.elems . Ast.actualMethods
 codeGenDataMembers :: Ast.DataMembers -> CodeGenContext ()
 codeGenDataMembers _ = return () -- TODO: implement me ...
 
-codeGenMethods' :: [ Ast.DecMethodContent ] -> CodeGenContext ()
-codeGenMethods' = mapM_ codeGenDecMethod
+codeGenMethods' :: [ Ast.StmtMethodContent ] -> CodeGenContext ()
+codeGenMethods' = mapM_ codeGenStmtMethod
 
-codeGenDecMethod :: Ast.DecMethodContent -> CodeGenContext ()
-codeGenDecMethod decMethod = do
+codeGenStmtMethod :: Ast.StmtMethodContent -> CodeGenContext ()
+codeGenStmtMethod stmtMethod = do
     beginScope
-    params' <- codeGenParams (Ast.decMethodParams decMethod)
-    body <- codeGenStmts (Ast.decMethodBody decMethod)
+    params' <- codeGenParams (Ast.stmtMethodParams stmtMethod)
+    body <- codeGenStmts (Ast.stmtMethodBody stmtMethod)
     endScope
     ctx <- get
-    let callables' = (decMethodToCallable decMethod (Cfg.concat params' body)) : (callables ctx)
+    let callables' = (stmtMethodToCallable stmtMethod (Cfg.concat params' body)) : (callables ctx)
     put (ctx { callables = callables' })
 
 -- | this function is called in two scenarios:
@@ -178,6 +171,7 @@ codeGenStmt (Ast.StmtIf     stmtIf    ) = codeGenStmtIf stmtIf
 codeGenStmt (Ast.StmtExp    stmtExp   ) = codeGenStmtExp stmtExp
 codeGenStmt (Ast.StmtCall   stmtCall  ) = codeGenStmtCall stmtCall
 codeGenStmt (Ast.StmtFunc   stmtFunc  ) = codeGenStmtFunc stmtFunc
+codeGenStmt (Ast.StmtClass  stmtClass ) = codeGenStmtClass stmtClass
 codeGenStmt (Ast.StmtDecvar stmtDecVar) = codeGenStmtDecvar stmtDecVar
 codeGenStmt (Ast.StmtAssign stmtAssign) = codeGenStmtAssign stmtAssign
 codeGenStmt (Ast.StmtImport stmtImport) = codeGenStmtImport stmtImport
@@ -706,13 +700,13 @@ decFuncToCallable stmtFunc cfg annotations = let
     content' = Callable.FunctionContent (Ast.stmtFuncName stmtFunc) cfg annotations (Ast.stmtFuncLocation stmtFunc)
     in Callable.Function content'
 
-decMethodToCallable :: Ast.DecMethodContent -> Cfg -> Callable
-decMethodToCallable decMethod cfg = let
-    hostingClassName' = Ast.hostingClassName decMethod
-    hostingClassSupers' = Ast.hostingClassSupers decMethod
-    decMethodName = Ast.decMethodName decMethod
-    location' = Ast.decMethodLocation decMethod
-    content' = Callable.MethodContent decMethodName hostingClassName' hostingClassSupers' cfg location'
+stmtMethodToCallable :: Ast.StmtMethodContent -> Cfg -> Callable
+stmtMethodToCallable stmtMethod cfg = let
+    hostingClassName' = Ast.hostingClassName stmtMethod
+    hostingClassSupers' = Ast.hostingClassSupers stmtMethod
+    stmtMethodName' = Ast.stmtMethodName stmtMethod
+    location' = Ast.stmtMethodLocation stmtMethod
+    content' = Callable.MethodContent stmtMethodName' hostingClassName' hostingClassSupers' cfg location'
     in Callable.Method content'
 
 lambdaToCallable :: Cfg -> Location -> Callable

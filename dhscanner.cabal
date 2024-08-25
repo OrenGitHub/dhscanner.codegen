@@ -48,8 +48,8 @@ executable codegen
     build-depends:
         base,
         containers,
-        dhscanner-ast >= 0.1.0.2,
-        dhscanner-bitcode,
+        dhscanner-ast >= 0.1.0.3,
+        dhscanner-bitcode >= 0.1.0.1,
         aeson,
         array,
         yesod,
