@@ -169,10 +169,9 @@ codeGenStmts' = mapM codeGenStmt
 codeGenStmt :: Ast.Stmt -> CodeGenContext Cfg
 codeGenStmt (Ast.StmtIf     stmtIf    ) = codeGenStmtIf stmtIf
 codeGenStmt (Ast.StmtExp    stmtExp   ) = codeGenStmtExp stmtExp
-codeGenStmt (Ast.StmtCall   stmtCall  ) = codeGenStmtCall stmtCall
 codeGenStmt (Ast.StmtFunc   stmtFunc  ) = codeGenStmtFunc stmtFunc
 codeGenStmt (Ast.StmtClass  stmtClass ) = codeGenStmtClass stmtClass
-codeGenStmt (Ast.StmtDecvar stmtDecVar) = codeGenStmtDecvar stmtDecVar
+codeGenStmt (Ast.StmtVardec stmtVardec) = codeGenStmtDecvar stmtVardec
 codeGenStmt (Ast.StmtAssign stmtAssign) = codeGenStmtAssign stmtAssign
 codeGenStmt (Ast.StmtImport stmtImport) = codeGenStmtImport stmtImport
 codeGenStmt (Ast.StmtReturn stmtReturn) = codeGenStmtReturn stmtReturn
@@ -245,23 +244,59 @@ codeGenStmtFunc stmtFunc = do
     put (ctx { symbolTable = symbolTable', callables = callables' })
     return $ Cfg.empty (Token.getFuncNameLocation (Ast.stmtFuncName stmtFunc))
 
+codeGenStmtImportAll :: String -> Location -> CodeGenContext Cfg
+codeGenStmtImportAll src l = do
+    ctx <- get
+    let srcVarName = Token.VarName (Token.Named src l)
+    let srcVar = Bitcode.SrcVariableCtor (Bitcode.SrcVariable (Fqn src) srcVarName)
+    let actualType = ActualType.ThirdPartyImport (ActualType.ThirdPartyImportContent src)
+    let symbolTable' = SymbolTable.insertVar srcVarName srcVar actualType (symbolTable ctx)
+    put $ ctx { symbolTable = symbolTable' }
+    return $ Cfg.empty l
+
+codeGenStmtImportSpecific :: String -> String -> Location -> CodeGenContext Cfg
+codeGenStmtImportSpecific src specific l = do
+    ctx <- get
+    let specificVarName = Token.VarName (Token.Named specific l)
+    let specificVar = Bitcode.SrcVariableCtor (Bitcode.SrcVariable (Fqn specific) specificVarName)
+    let actualType = ActualType.ThirdPartyImport (ActualType.ThirdPartyImportContent (src ++ "." ++ specific))
+    let symbolTable' = SymbolTable.insertVar specificVarName specificVar actualType (symbolTable ctx)
+    put $ ctx { symbolTable = symbolTable' }
+    return $ Cfg.empty l
+
+codeGenStmtImportSpecificWithAlias :: String -> String -> String -> Location -> CodeGenContext Cfg
+codeGenStmtImportSpecificWithAlias src specific alias l = do
+    ctx <- get
+    let aliasVarName = Token.VarName (Token.Named alias l)
+    let aliasVar = Bitcode.SrcVariableCtor (Bitcode.SrcVariable (Fqn alias) aliasVarName)
+    let actualType = ActualType.ThirdPartyImport (ActualType.ThirdPartyImportContent (src ++ "." ++ specific))
+    let symbolTable' = SymbolTable.insertVar aliasVarName aliasVar actualType (symbolTable ctx)
+    put $ ctx { symbolTable = symbolTable' }
+    return $ Cfg.empty l
+
+codeGenStmtImportAllWithAlias :: String -> String -> Location -> CodeGenContext Cfg
+codeGenStmtImportAllWithAlias src alias l = do
+    ctx <- get
+    let aliasVarName = Token.VarName (Token.Named alias l)
+    let aliasVar = Bitcode.SrcVariableCtor (Bitcode.SrcVariable (Fqn alias) aliasVarName)
+    let actualType = ActualType.ThirdPartyImport (ActualType.ThirdPartyImportContent src)
+    let symbolTable' = SymbolTable.insertVar aliasVarName aliasVar actualType (symbolTable ctx)
+    put $ ctx { symbolTable = symbolTable' }
+    return $ Cfg.empty l
+
 codeGenStmtImport :: Ast.StmtImportContent -> CodeGenContext Cfg
 codeGenStmtImport stmtImport = do
-    ctx <- get
-    let name = (Ast.stmtImportName stmtImport)
-    let alias = (Ast.stmtImportAlias stmtImport)
-    let location' = (Ast.stmtImportLocation stmtImport)
-    let nameToken = Token.Named name location'
-    let aliasToken = Token.Named alias location'
-    let nameVar = Token.VarName nameToken
-    let aliasVar = Token.VarName aliasToken
-    let srcVariable = Bitcode.SrcVariableCtor $ Bitcode.SrcVariable (Fqn name) aliasVar
-    let thirdParty = ActualType.ThirdPartyImport (ActualType.ThirdPartyImportContent name)
-    let existingType = SymbolTable.lookupVar nameVar (symbolTable ctx)
-    let actualType = case existingType of { Nothing -> thirdParty; Just (_,t) -> t }
-    let symbolTable' = SymbolTable.insertVar aliasVar srcVariable actualType (symbolTable ctx)
-    put $ ctx { symbolTable = symbolTable' }
-    return $ Cfg.empty location'
+    let loc = Ast.stmtImportLocation stmtImport
+    let src = Ast.stmtImportSource stmtImport
+    let specific = Ast.stmtImportFromSource stmtImport
+    let alias = Ast.stmtImportAlias stmtImport
+    case specific of
+        Nothing -> case alias of
+            Nothing -> codeGenStmtImportAll src loc
+            Just alias' -> codeGenStmtImportAllWithAlias src alias' loc
+        Just specific' -> case alias of
+            Nothing -> codeGenStmtImportSpecific src specific' loc
+            Just alias' -> codeGenStmtImportSpecificWithAlias src specific' alias' loc
 
 dummyTmpVar :: Bitcode.Variable
 dummyTmpVar = Bitcode.TmpVariableCtor $ Bitcode.TmpVariable Fqn.nativeInt defaultLoc
@@ -608,16 +643,16 @@ codeGenStmtAssign s = codeGenStmtAssign' (Ast.stmtAssignLhs s) (Ast.stmtAssignRh
 --
 -- * Generating the initial value (if it exists) is non monadic
 --
-codeGenStmtDecvar :: Ast.DecVarContent -> CodeGenContext Cfg
-codeGenStmtDecvar d = case Ast.decVarInitValue d of
-    Nothing -> codeGenDecVarNoInit d (Token.getVarNameLocation (Ast.decVarName d))
-    Just init -> codeGenDecVarInit (Ast.decVarName d) (Ast.decVarNominalType d) init
+codeGenStmtDecvar :: Ast.StmtVardecContent -> CodeGenContext Cfg
+codeGenStmtDecvar d = case Ast.stmtVardecInitValue d of
+    Nothing -> codeGenDecVarNoInit d (Token.getVarNameLocation (Ast.stmtVardecName d))
+    Just init -> codeGenDecVarInit (Ast.stmtVardecName d) (Ast.stmtVardecNominalType d) init
 
 -- |
 -- * update the symbol table with the declared variable
 --
 -- * return an empty cfg (nop) since nothing happens (no init)
-codeGenDecVarNoInit :: Ast.DecVarContent -> Location -> CodeGenContext Cfg
+codeGenDecVarNoInit :: Ast.StmtVardecContent -> Location -> CodeGenContext Cfg
 codeGenDecVarNoInit d loc = do { codeGenDecVarNoInit' d; return $ Cfg.empty loc }
 
 -- | helper for codeGenDecVarInit
@@ -653,11 +688,11 @@ codeGenDecVarInit varName _ init = do
 
 -- | pure non-monadic function, just update
 -- the symbol table with the declared variable
-codeGenDecVarNoInit' :: Ast.DecVarContent -> CodeGenContext ()
-codeGenDecVarNoInit' decVar = do
+codeGenDecVarNoInit' :: Ast.StmtVardecContent -> CodeGenContext ()
+codeGenDecVarNoInit' vardec = do
     ctx <- get;
-    let varName = Ast.decVarName decVar
-    let nominalType = Ast.decVarNominalType decVar
+    let varName = Ast.stmtVardecName vardec
+    let nominalType = Ast.stmtVardecNominalType vardec
     let actualType = SymbolTable.lookupNominalType nominalType (symbolTable ctx)
     let bitcodeVar = Bitcode.SrcVariableCtor $ Bitcode.SrcVariable (ActualType.toFqn actualType) varName
     let symbolTable' = SymbolTable.insertVar varName bitcodeVar actualType (symbolTable ctx)
