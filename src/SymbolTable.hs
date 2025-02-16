@@ -113,6 +113,11 @@ insertParam name v t = insert (Token.getParamNameToken name) v t
 lookupVar :: Token.VarName -> SymbolTable -> Maybe (Bitcode.Variable, ActualType)
 lookupVar v table = lookup' (Token.content $ Token.getVarNameToken v) (scopes table)
 
+lookupSuperType :: Token.SuperName -> SymbolTable -> Maybe ActualType
+lookupSuperType super table = case lookup' (Token.content $ Token.getSuperNameToken super) (scopes table) of
+    Nothing -> Nothing
+    Just (_, actualType) -> Just actualType
+
 lookupNominalType :: Token.NominalTy -> SymbolTable -> ActualType
 lookupNominalType t table = case lookup' (Token.content $ Token.getNominalTyToken t) (scopes table) of
     Nothing -> ActualType.Any

@@ -147,7 +147,8 @@ codeGenStmtMethod stmtMethod = do
     body <- codeGenStmts (Ast.stmtMethodBody stmtMethod)
     endScope
     ctx <- get
-    let callables' = (stmtMethodToCallable stmtMethod (Cfg.concat params' body)) : (callables ctx)
+    let symbolTable' = symbolTable ctx
+    let callables' = (stmtMethodToCallable stmtMethod symbolTable' (Cfg.concat params' body)) : (callables ctx)
     put (ctx { callables = callables' })
 
 -- | this function is called in two scenarios:
@@ -739,10 +740,20 @@ decFuncToCallable stmtFunc cfg annotations = let
     content' = Callable.FunctionContent (Ast.stmtFuncName stmtFunc) cfg annotations (Ast.stmtFuncLocation stmtFunc)
     in Callable.Function content'
 
-stmtMethodToCallable :: Ast.StmtMethodContent -> Cfg -> Callable
-stmtMethodToCallable stmtMethod cfg = let
+fqnify :: SymbolTable -> [ Token.SuperName ] -> [ Fqn ]
+fqnify symbolTable = Data.List.map (fqnify' symbolTable)
+
+fqnify' :: SymbolTable -> Token.SuperName -> Fqn
+fqnify' symbolTable superName = let
+    actualType = SymbolTable.lookupSuperType superName symbolTable
+    in case actualType of
+        Nothing -> Fqn (Token.content (Token.getSuperNameToken superName))
+        Just actualType' -> toFqn actualType'
+
+stmtMethodToCallable :: Ast.StmtMethodContent -> SymbolTable -> Cfg -> Callable
+stmtMethodToCallable stmtMethod symbolTable cfg = let
     hostingClassName' = Ast.hostingClassName stmtMethod
-    hostingClassSupers' = Ast.hostingClassSupers stmtMethod
+    hostingClassSupers' = fqnify symbolTable (Ast.hostingClassSupers stmtMethod)
     stmtMethodName' = Ast.stmtMethodName stmtMethod
     location' = Ast.stmtMethodLocation stmtMethod
     content' = Callable.MethodContent stmtMethodName' hostingClassName' hostingClassSupers' cfg location'
