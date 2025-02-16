@@ -171,6 +171,7 @@ codeGenStmt (Ast.StmtIf     stmtIf    ) = codeGenStmtIf stmtIf
 codeGenStmt (Ast.StmtExp    stmtExp   ) = codeGenStmtExp stmtExp
 codeGenStmt (Ast.StmtFunc   stmtFunc  ) = codeGenStmtFunc stmtFunc
 codeGenStmt (Ast.StmtClass  stmtClass ) = codeGenStmtClass stmtClass
+codeGenStmt (Ast.StmtBlock  stmtBlock ) = codeGenStmtBlock stmtBlock
 codeGenStmt (Ast.StmtVardec stmtVardec) = codeGenStmtDecvar stmtVardec
 codeGenStmt (Ast.StmtAssign stmtAssign) = codeGenStmtAssign stmtAssign
 codeGenStmt (Ast.StmtImport stmtImport) = codeGenStmtImport stmtImport
@@ -182,6 +183,9 @@ codeGenStmtExp e = do { e' <- codeGenExp e; return $ generatedCfg e' }
 
 codeGenStmtReturnNothing :: Ast.StmtReturnContent -> CodeGenContext Cfg
 codeGenStmtReturnNothing stmtReturn = return $ Cfg.empty (Ast.stmtReturnLocation stmtReturn)
+
+codeGenStmtBlock :: Ast.StmtBlockContent -> CodeGenContext Cfg
+codeGenStmtBlock = codeGenStmts . Ast.stmtBlockContent
 
 codeGenStmtReturnValue :: Ast.Exp -> CodeGenContext Cfg
 codeGenStmtReturnValue exp = do
