@@ -386,10 +386,21 @@ codeGenParam :: Word -> Ast.Param -> CodeGenContext Cfg
 codeGenParam paramSerialIdx' param = do
     ctx <- get
     let paramName' = Ast.paramName param
+    let paramRawName = Token.content $ Token.getParamNameToken paramName'
     let location' = Token.getParamNameLocation paramName'
     let nominalType = Ast.paramNominalType param
     let nominalTypeName = Token.content (Token.getNominalTyToken nominalType)
-    let actualType = SymbolTable.lookupNominalType nominalType (symbolTable ctx)
+    -- some languages explictly pass self / this as the first parameter
+    -- also, some languages force the use of self.<method> (python)
+    -- while other languages (Java) enable both variants (this.<method> and just <method>)
+    -- even a strictly type-hinted python code will *not* annotate self - this will
+    -- cause a type override in the symbol table where "self" will have type "any"
+    let fromSelf = SymbolTable.lookupVar (Token.VarName (Token.Named "self" location')) (symbolTable ctx)
+    let fromNominal = SymbolTable.lookupNominalType nominalType (symbolTable ctx)
+    let actualType = case paramRawName of {
+        "self" -> case fromSelf of { Nothing -> fromNominal; Just (_,t) -> t };
+        _ -> fromNominal
+    }
     let fqn' = ActualType.toFqn actualType
     let fqn'' = Fqn (Token.content (Token.getParamNameToken paramName'))
     let fqn = case nominalTypeName == "any" of { True -> fqn''; False -> fqn' }
@@ -452,16 +463,7 @@ codeGenExpVarSimple :: Ast.VarSimpleContent -> CodeGenState -> GeneratedExp
 codeGenExpVarSimple v ctx = case SymbolTable.lookupVar (Ast.varName v) (symbolTable ctx) of
     Nothing -> codeGenExpVarSimpleMissing (Ast.varName v)
     Just (bitcodeVar, actualType) -> codeGenExpVarSimpleExisting (Ast.varName v) bitcodeVar actualType
-
-getFieldedAccesThirdPartyType :: String -> Token.FieldName -> ActualType
-getFieldedAccesThirdPartyType c fieldName = let
-    rawFieldName = Token.content $ Token.getFieldNameToken fieldName
-    in ThirdPartyImport $ ThirdPartyImportContent (c ++ "." ++ rawFieldName) 
  
-getFieldedAccess :: ActualType -> Token.FieldName -> ActualType
-getFieldedAccess (ThirdPartyImport (ThirdPartyImportContent c)) fieldName = getFieldedAccesThirdPartyType c fieldName
-getFieldedAccess actualType _ = actualType
-
 codeGenExpVarField :: Ast.VarFieldContent -> CodeGenContext GeneratedExp
 codeGenExpVarField v = do
     v' <- codeGenExp (Ast.varFieldLhs v)
