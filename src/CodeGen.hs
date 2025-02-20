@@ -309,12 +309,6 @@ dummyTmpVar = Bitcode.TmpVariableCtor $ Bitcode.TmpVariable Fqn.nativeInt defaul
 dummyActualType :: ActualType
 dummyActualType = someType
 
--- | in fact, stmt call only wraps an expression call,
--- whose value doesn't get assigned anywhere ... it's really
--- all about wrapping the call to codeGenExpCall ...
-codeGenStmtCall :: Ast.ExpCallContent -> CodeGenContext Cfg
-codeGenStmtCall call = do { call' <- codeGenExpCall call; return $ generatedCfg call' }
-
 -- | dispatch codegen exp handlers
 codeGenExp :: Ast.Exp -> CodeGenContext GeneratedExp
 codeGenExp (Ast.ExpInt    expInt    ) = return $ codeGenExpInt expInt -- ctx not needed
@@ -583,15 +577,14 @@ codeGenStmtAssignToSimpleVar varName init = do
     let actualType = inferredActualType init'
     let fqn = ActualType.toFqn actualType
     let location' = Token.getVarNameLocation varName
-    let srcVariable = Bitcode.SrcVariableCtor $ Bitcode.SrcVariable fqn varName
-    let symbolTable' = SymbolTable.insertVar varName srcVariable actualType (symbolTable ctx)
-    let varAlreadyExists = SymbolTable.varExists varName (symbolTable ctx)
+    let existingVar = SymbolTable.lookupVar varName (symbolTable ctx)
+    let newVariable = Bitcode.SrcVariableCtor $ Bitcode.SrcVariable fqn varName
+    let symbolTable' = SymbolTable.insertVar varName newVariable actualType (symbolTable ctx)
     let updateSymbolTable = ctx { symbolTable = symbolTable' }
     let dontChangeCtx = ctx
-    -- conditional update of the symbol table
-    -- this is the part that is different from `codeGenDecVarInit`
-    put $ case varAlreadyExists of { True -> dontChangeCtx; False -> updateSymbolTable }
-    return $ initCfg `Cfg.concat` (createAssignCfg location' srcVariable initVariable)
+    let actualVar = case existingVar of { Nothing -> newVariable; Just (v, _) -> v }
+    put $ case existingVar of { Nothing -> updateSymbolTable; _ -> dontChangeCtx }
+    return $ initCfg `Cfg.concat` (createAssignCfg location' actualVar initVariable)
     
 codeGenStmtAssignToFieldVar :: Ast.VarFieldContent -> Ast.Exp -> CodeGenContext Cfg
 codeGenStmtAssignToFieldVar var exp = do
