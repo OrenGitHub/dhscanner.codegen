@@ -1,3 +1,5 @@
+[![Cabal build](https://github.com/OrenGitHub/dhscanner.codegen/actions/workflows/main.yml/badge.svg)](https://github.com/OrenGitHub/dhscanner.codegen/actions/workflows/main.yml)
+
 code generation ( [bitcode][1] ) from dhscanner [absrtact syntax trees][2]
 
 [1]: https://hackage.haskell.org/package/dhscanner-bitcode-0.1.0.3/docs/Bitcode.html
