@@ -1,4 +1,0 @@
-FROM haskell:9.8.1
-RUN wget https://github.com/OrenGitHub/dhscanner.codegen/releases/download/v0.0.3/codegen.elf
-RUN chmod +x codegen.elf
-CMD ["./codegen.elf"]
