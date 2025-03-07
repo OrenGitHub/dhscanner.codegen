@@ -1,27 +1,4 @@
-# dhscanner.codegen
+code generation ( [bitcode][1] ) from dhscanner [absrtact syntax trees][2]
 
-An [AST][1]-based type resolver
-See also [OrenGitHub/dhscanner.ast][1]
-
-## run on docker
-
-```bash
-docker build --tag host.codegen --file Dockerfile .
-docker run -p 8002:3000 -d -t --name codegen host.codegen
-```
-
-## run
-
-```bash
-# from dhscanner
-python analyze.py
-```
-
-## documentation
-
-```
-cabal haddock --html $(find src -name \*.hs)
-```
-
-[1]: https://en.wikipedia.org/wiki/Abstract_syntax_tree
-[2]: https://github.com/OrenGitHub/dhscanner.ast
+[1]: https://hackage.haskell.org/package/dhscanner-bitcode-0.1.0.3/docs/Bitcode.html
+[2]: https://hackage.haskell.org/package/dhscanner-ast-0.1.0.5/docs/Ast.html
