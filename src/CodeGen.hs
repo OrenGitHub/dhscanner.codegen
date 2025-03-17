@@ -140,6 +140,18 @@ codeGenDataMembers _ = return () -- TODO: implement me ...
 codeGenMethods' :: [ Ast.StmtMethodContent ] -> CodeGenContext ()
 codeGenMethods' = mapM_ codeGenStmtMethod
 
+codeGenStmtMethodSingle :: Ast.StmtMethodContent -> CodeGenContext Cfg
+codeGenStmtMethodSingle stmtMethod = do
+    beginScope
+    params' <- codeGenParams (Ast.stmtMethodParams stmtMethod)
+    body <- codeGenStmts (Ast.stmtMethodBody stmtMethod)
+    endScope
+    ctx <- get
+    let symbolTable' = symbolTable ctx
+    let callables' = (stmtMethodToCallable stmtMethod symbolTable' (Cfg.concat params' body)) : (callables ctx)
+    put (ctx { callables = callables' })
+    return $ Cfg.empty (Ast.stmtMethodLocation stmtMethod)
+
 codeGenStmtMethod :: Ast.StmtMethodContent -> CodeGenContext ()
 codeGenStmtMethod stmtMethod = do
     beginScope
@@ -177,26 +189,36 @@ codeGenStmt (Ast.StmtVardec stmtVardec) = codeGenStmtDecvar stmtVardec
 codeGenStmt (Ast.StmtAssign stmtAssign) = codeGenStmtAssign stmtAssign
 codeGenStmt (Ast.StmtImport stmtImport) = codeGenStmtImport stmtImport
 codeGenStmt (Ast.StmtReturn stmtReturn) = codeGenStmtReturn stmtReturn
+codeGenStmt (Ast.StmtMethod stmtMethod) = codeGenStmtMethodSingle stmtMethod
 codeGenStmt _                           = return $ Cfg.empty defaultLoc
 
 codeGenStmtExp :: Ast.Exp -> CodeGenContext Cfg
 codeGenStmtExp e = do { e' <- codeGenExp e; return $ generatedCfg e' }
 
-codeGenStmtReturnNothing :: Ast.StmtReturnContent -> CodeGenContext Cfg
-codeGenStmtReturnNothing stmtReturn = return $ Cfg.empty (Ast.stmtReturnLocation stmtReturn)
-
 codeGenStmtBlock :: Ast.StmtBlockContent -> CodeGenContext Cfg
 codeGenStmtBlock = codeGenStmts . Ast.stmtBlockContent
 
-codeGenStmtReturnValue :: Ast.Exp -> CodeGenContext Cfg
-codeGenStmtReturnValue exp = do
+codeGenStmtReturnNothing :: Ast.StmtReturnContent -> CodeGenContext Cfg
+codeGenStmtReturnNothing stmtReturn = do
+    let location' = Ast.stmtReturnLocation stmtReturn
+    let content' = Bitcode.ReturnContent Nothing
+    let returnInstruction = Bitcode.Return content'
+    let instruction = Bitcode.Instruction location' returnInstruction
+    return $ Cfg.atom (Cfg.Node instruction)
+
+codeGenStmtReturnValue :: Location -> Ast.Exp -> CodeGenContext Cfg
+codeGenStmtReturnValue loc exp = do
     returnValue' <- codeGenExp exp
-    return $ generatedCfg returnValue'
+    let content' = Bitcode.ReturnContent (Just (generatedValue returnValue'))
+    let returnInstruction = Bitcode.Return content'
+    let instruction = Bitcode.Instruction loc returnInstruction
+    let returnCfg = Cfg.atom (Cfg.Node instruction)
+    return $ (generatedCfg returnValue') `Cfg.concat` returnCfg
 
 codeGenStmtReturn :: Ast.StmtReturnContent -> CodeGenContext Cfg
 codeGenStmtReturn stmtReturn = case (Ast.stmtReturnValue stmtReturn) of
     Nothing -> codeGenStmtReturnNothing stmtReturn
-    Just returnedValue -> codeGenStmtReturnValue returnedValue
+    Just returnedValue -> codeGenStmtReturnValue (Ast.stmtReturnLocation stmtReturn) returnedValue
 
 codeGenStmtIf :: Ast.StmtIfContent -> CodeGenContext Cfg
 codeGenStmtIf stmtIf = do
