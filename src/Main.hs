@@ -13,7 +13,6 @@ import Yesod
 import Prelude
 import Data.Set
 import Data.Aeson()
-import GHC.Generics
 import Data.Text
 import Data.Time
 import Data.List
@@ -76,8 +75,8 @@ extractRelevant instructions = catMaybes (Data.List.map relevantOrNothing instru
 
 getInstructions' :: Cfg -> [ Bitcode.Instruction ]
 getInstructions' cfg = let
-    nodes = Cfg.actualNodes (Cfg.nodes cfg)
-    in Data.Set.toList (Data.Set.map Cfg.theInstructionInside nodes)
+    _nodes = Cfg.actualNodes (Cfg.nodes cfg)
+    in Data.Set.toList (Data.Set.map Cfg.theInstructionInside _nodes)
 
 getInstructions :: [ Cfg ] -> [ Bitcode.Instruction ]
 getInstructions cfgs = Data.List.foldl' (++) [] (Data.List.map getInstructions' cfgs)
@@ -114,8 +113,8 @@ postHomeR = do
 myLogger :: IO Logger
 myLogger = do
     _loggerSet <- newStdoutLoggerSet defaultBufSize
-    formatter <- newTimeCache "[%d/%m/%Y ( %H:%M:%S )]"
-    return $ Logger _loggerSet formatter
+    _formatter <- newTimeCache "[%d/%m/%Y ( %H:%M:%S )]"
+    return $ Logger _loggerSet _formatter
 
 dateFormatter :: String -> String
 dateFormatter date = let
