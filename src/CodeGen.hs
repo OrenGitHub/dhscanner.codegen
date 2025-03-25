@@ -398,8 +398,23 @@ codeGenParams' :: Word -> [ Ast.Param ] -> CodeGenContext [ Cfg ]
 codeGenParams' _ [] = return []
 codeGenParams' i (p:ps) = do { cfg <- codeGenParam i p; cfgs <- codeGenParams' (i+1) ps; return (cfg:cfgs) }
 
-codeGenParam :: Word -> Ast.Param -> CodeGenContext Cfg
-codeGenParam paramSerialIdx' param = do
+-- | The nominal type is represented as an Ast.Var
+codeGenParam' :: Word -> Token.ParamName -> Ast.Var -> CodeGenContext Cfg
+codeGenParam' i name nominalType = do
+    ctx <- get
+    nominalType' <- codeGenVar nominalType
+    let actualType = inferredActualType nominalType'
+    let fqn = ActualType.toFqn actualType
+    let location' = Token.getParamNameLocation name
+    let paramVar = Bitcode.ParamVariable fqn i name
+    let v = Bitcode.ParamVariableCtor paramVar
+    let paramDecl = Bitcode.ParamDecl $ Bitcode.ParamDeclContent paramVar
+    let instruction = Bitcode.Instruction location' paramDecl
+    put (ctx { symbolTable = SymbolTable.insertParam name v actualType (symbolTable ctx) })
+    return (Cfg.atom (Cfg.Node instruction))
+
+codeGenParam'' :: Word -> Ast.Param -> CodeGenContext Cfg
+codeGenParam'' paramSerialIdx' param = do
     ctx <- get
     let paramName' = Ast.paramName param
     let paramRawName = Token.content $ Token.getParamNameToken paramName'
@@ -426,6 +441,11 @@ codeGenParam paramSerialIdx' param = do
     let v = Bitcode.ParamVariableCtor paramVar
     put (ctx { symbolTable = SymbolTable.insertParam paramName' v actualType (symbolTable ctx) })
     return (Cfg.atom (Cfg.Node instruction))
+
+codeGenParam :: Word -> Ast.Param -> CodeGenContext Cfg
+codeGenParam paramSerialIdx' param = case Ast.paramNominalTypeV2 param of
+    Nothing -> codeGenParam'' paramSerialIdx' param
+    Just nominalType -> codeGenParam' paramSerialIdx' (Ast.paramName param) nominalType
 
 -- |
 -- * generate an indicative variable (via location).
@@ -475,13 +495,13 @@ codeGenExpVarSimpleMissing v = let
 codeGenExpVarSimpleExisting :: Token.VarName -> Bitcode.Variable -> ActualType -> GeneratedExp
 codeGenExpVarSimpleExisting v b t = GeneratedExp (Cfg.empty (Token.getVarNameLocation v)) b t 
 
-codeGenExpVarSimple :: Ast.VarSimpleContent -> CodeGenState -> GeneratedExp
-codeGenExpVarSimple v ctx = case SymbolTable.lookupVar (Ast.varName v) (symbolTable ctx) of
+codeGenVarSimple :: Ast.VarSimpleContent -> CodeGenState -> GeneratedExp
+codeGenVarSimple v ctx = case SymbolTable.lookupVar (Ast.varName v) (symbolTable ctx) of
     Nothing -> codeGenExpVarSimpleMissing (Ast.varName v)
     Just (bitcodeVar, actualType) -> codeGenExpVarSimpleExisting (Ast.varName v) bitcodeVar actualType
  
-codeGenExpVarField :: Ast.VarFieldContent -> CodeGenContext GeneratedExp
-codeGenExpVarField v = do
+codeGenVarField :: Ast.VarFieldContent -> CodeGenContext GeneratedExp
+codeGenVarField v = do
     v' <- codeGenExp (Ast.varFieldLhs v)
     let fieldName = Ast.varFieldName v
     let cfgLhsExpVar = generatedCfg v'
@@ -498,8 +518,8 @@ codeGenExpVarField v = do
     let cfg = cfgLhsExpVar `Cfg.concat` cfgFieldRead
     return $ GeneratedExp cfg output actualType'
 
-codeGenExpVarSubscript :: Ast.VarSubscriptContent -> CodeGenContext GeneratedExp
-codeGenExpVarSubscript v = do
+codeGenVarSubscript :: Ast.VarSubscriptContent -> CodeGenContext GeneratedExp
+codeGenVarSubscript v = do
     v' <- codeGenExp (Ast.varSubscriptLhs v)
     i' <- codeGenExp (Ast.varSubscriptIdx v)
     let cfgLhs = generatedCfg v'
@@ -517,11 +537,14 @@ codeGenExpVarSubscript v = do
     let cfg = cfgIdx `Cfg.concat` cfgLhs `Cfg.concat` cfgSubscriptRead
     return $ GeneratedExp cfg output actualType
 
+codeGenVar :: Ast.Var -> CodeGenContext GeneratedExp
+codeGenVar (Ast.VarSimple    v) = do { ctx <- get; return $ codeGenVarSimple v ctx }
+codeGenVar (Ast.VarField     v) = codeGenVarField v
+codeGenVar (Ast.VarSubscript v) = codeGenVarSubscript v
+
 -- | dispatch codegen (exp) var handlers
 codeGenExpVar :: Ast.ExpVarContent -> CodeGenContext GeneratedExp
-codeGenExpVar (Ast.ExpVarContent (Ast.VarSimple    v)) = do { ctx <- get; return $ codeGenExpVarSimple v ctx }
-codeGenExpVar (Ast.ExpVarContent (Ast.VarField     v)) = codeGenExpVarField v
-codeGenExpVar (Ast.ExpVarContent (Ast.VarSubscript v)) = codeGenExpVarSubscript v
+codeGenExpVar (Ast.ExpVarContent v) = codeGenVar v
 
 -- | code gen exps ( plural )
 codeGenExps :: [ Ast.Exp ] -> CodeGenContext [ GeneratedExp ] 
