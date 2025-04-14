@@ -1,0 +1,4 @@
+FROM ubuntu
+COPY codegen.elf.x64 .
+RUN chmod +x codegen.elf.x64
+CMD ["./codegen.elf.x64"]
