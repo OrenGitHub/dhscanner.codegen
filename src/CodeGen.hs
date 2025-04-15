@@ -22,6 +22,7 @@ import qualified ActualType
 import qualified SymbolTable
 
 -- general imports
+import Data.Maybe
 import Data.List hiding ( init )
 import Prelude hiding ( exp, init )
 import Control.Monad.State.Lazy
@@ -246,11 +247,19 @@ assumeIfNotTakenGen cond loc = let
 codeGenAnnotations :: [ Ast.Exp ] -> CodeGenContext [ Callable.Annotation ]
 codeGenAnnotations = mapM codeGenAnnotation
 
+stringOrNothing :: Ast.Exp -> Maybe Token.ConstStr
+stringOrNothing (Ast.ExpStr (Ast.ExpStrContent s)) = Just s
+stringOrNothing _ = Nothing
+
+keepStrings :: [ Ast.Exp ] -> [ Token.ConstStr ]
+keepStrings exps = catMaybes (map stringOrNothing exps)
+
 codeGenAnnotation :: Ast.Exp -> CodeGenContext Callable.Annotation
 codeGenAnnotation exp = do
     exp' <- codeGenExp exp
     let fqn = ActualType.toFqn (inferredActualType exp')
-    return $ Callable.Annotation (Fqn.content fqn) []
+    let args = case exp of { (Ast.ExpCall (Ast.ExpCallContent _ a _)) -> a; _ -> [] }
+    return $ Callable.Annotation (Fqn.content fqn) (map Token.constStrValue (keepStrings args))
 
 codeGenStmtFunc :: Ast.StmtFuncContent -> CodeGenContext Cfg
 codeGenStmtFunc stmtFunc = do
