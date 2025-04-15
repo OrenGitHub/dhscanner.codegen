@@ -70,36 +70,12 @@ initCodeGenState = CodeGenState {
 }
 
 -- | API: generates code packed as a collection of callables
-codeGen :: Asts -> Callables
-codeGen = Callables . codeGen' . asts
+codeGen :: Ast.Root -> Callables
+codeGen ast = Callables (callables (execState (codeGenRoot ast) initCodeGenState))
 
--- | /all/ the files / asts from a given language are handled together
-codeGen' :: [ Ast.Root ] -> [ Callable ]
-codeGen' asts' = callables $ execState (codeGenRoots asts') initCodeGenState
-
--- | no return value - computations are accummulated in the state
-codeGenRoots :: [ Ast.Root ] -> CodeGenContext ()
-codeGenRoots = mapM_ codeGenRoot 
-
--- |
--- * possibly /changing the original order/ of the file
---
--- * statements are collected and handled first
---
--- * declarations are handled second
---
 codeGenRoot :: Ast.Root -> CodeGenContext ()
 codeGenRoot = codeGenStmtsPart . Ast.stmts
 
--- |
--- traversing the statements of the file has 2 effects:
---
--- * generating the "script" callable
---
--- * generating lambda and function callables
---
--- combine the 2 and update the state accordingly
---
 codeGenStmtsPart :: [ Ast.Stmt ] -> CodeGenContext ()
 codeGenStmtsPart stmts = do
     scriptCfg <- codeGenStmts stmts -- script part

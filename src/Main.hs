@@ -29,7 +29,7 @@ import qualified Network.Wai.Middleware.RequestLogger as Wai
 
 -- project imports
 import Cfg
-import Asts
+import Ast
 import Location
 import Callable
 import qualified Bitcode
@@ -100,8 +100,8 @@ filterRelavantFrom (Callables callables) = let
 
 postHomeR :: Handler Value
 postHomeR = do
-    _asts <- requireCheckJsonBody :: Handler Asts
-    let result = codeGen _asts
+    ast <- requireCheckJsonBody :: Handler Ast.Root
+    let result = codeGen ast
     -- code gen textual output is *huge*
     -- even powerful editors like vim choke on it
     -- until I find a better way, I will let the
