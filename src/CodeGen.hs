@@ -136,9 +136,20 @@ codeGenStmtMethod stmtMethod = do
     body <- codeGenStmts (Ast.stmtMethodBody stmtMethod)
     endScope
     ctx <- get
-    let symbolTable' = symbolTable ctx
+    let hostingClass = (Ast.hostingClassName stmtMethod)
+    let rawClassName = Token.getClassNameToken hostingClass
+    let emptyDataMembers = ActualType.DataMembers Data.Set.empty
+    let emptyMethods = ActualType.Methods Data.Map.empty
+    let emptySupers = ActualType.Supers Data.Set.empty
+    let classType = ActualType.Class (ActualType.ClassContent hostingClass emptySupers emptyMethods emptyDataMembers)
+    let classVar = Bitcode.SrcVariableCtor $ Bitcode.SrcVariable (Fqn (Token.content rawClassName)) (Token.VarName rawClassName) 
+    let symbolTable' = SymbolTable.insertClass hostingClass classVar classType (symbolTable ctx)
+    let symbolTable'' = case SymbolTable.lookupVar (Token.VarName rawClassName) (symbolTable ctx) of {
+        Nothing -> symbolTable';
+        _ -> (symbolTable ctx)
+    }
     let callables' = (stmtMethodToCallable stmtMethod symbolTable' (Cfg.concat params' body)) : (callables ctx)
-    put (ctx { callables = callables' })
+    put (ctx { callables = callables', symbolTable = symbolTable'' })
 
 -- | this function is called in two scenarios:
 --
@@ -250,7 +261,12 @@ codeGenStmtFunc stmtFunc = do
     let funcName' = Token.VarName $ Token.getFuncNameToken (Ast.stmtFuncName stmtFunc)
     let funcFqn = Fqn (Token.content (Token.getVarNameToken funcName'))
     let funcVar = Bitcode.SrcVariableCtor $ Bitcode.SrcVariable funcFqn funcName'
-    let funcContent = ActualType.FunctionContent (Ast.stmtFuncName stmtFunc) (ActualType.Params []) someType
+    let r = Token.getNominalTyToken (Ast.stmtFuncReturnType stmtFunc)
+    let emptyDataMembers = ActualType.DataMembers Data.Set.empty
+    let emptyMethods = ActualType.Methods Data.Map.empty
+    let emptySupers = ActualType.Supers Data.Set.empty
+    let returnType = ActualType.Class (ActualType.ClassContent (Token.ClassName r) emptySupers emptyMethods emptyDataMembers)
+    let funcContent = ActualType.FunctionContent (Ast.stmtFuncName stmtFunc) (ActualType.Params []) returnType
     let funcType = ActualType.Function funcContent
     let symbolTable' = SymbolTable.insertVar funcName' funcVar funcType (symbolTable ctx)
     put (ctx { symbolTable = symbolTable', callables = callables' })
