@@ -117,8 +117,24 @@ codeGenDataMembers _ = return () -- TODO: implement me ...
 codeGenMethods' :: [ Ast.StmtMethodContent ] -> CodeGenContext ()
 codeGenMethods' = mapM_ codeGenStmtMethod
 
+insertEmptyClass :: Token.ClassName -> CodeGenContext ()
+insertEmptyClass className = do
+    ctx <- get
+    let classNameToken = Token.getClassNameToken className
+    let classVarName = Token.VarName classNameToken
+    let classFqn = Fqn (Token.content classNameToken)
+    let classSrcVar = Bitcode.SrcVariable classFqn classVarName
+    let classVar = Bitcode.SrcVariableCtor classSrcVar
+    let emptyDataMembers = ActualType.DataMembers Data.Set.empty
+    let emptyMethods = ActualType.Methods Data.Map.empty
+    let emptySupers = ActualType.Supers Data.Set.empty
+    let actualType = ActualType.Class (ActualType.ClassContent className emptySupers emptyMethods emptyDataMembers)
+    let symbolTable' = SymbolTable.insertClass className classVar actualType (symbolTable ctx)
+    put $ ctx { symbolTable = symbolTable' }
+
 codeGenStmtMethodSingle :: Ast.StmtMethodContent -> CodeGenContext Cfg
 codeGenStmtMethodSingle stmtMethod = do
+    insertEmptyClass (Ast.hostingClassName stmtMethod)
     beginScope
     params' <- codeGenParams (Ast.stmtMethodParams stmtMethod)
     body <- codeGenStmts (Ast.stmtMethodBody stmtMethod)
@@ -172,6 +188,7 @@ codeGenStmt (Ast.StmtIf     stmtIf    ) = codeGenStmtIf stmtIf
 codeGenStmt (Ast.StmtExp    stmtExp   ) = codeGenStmtExp stmtExp
 codeGenStmt (Ast.StmtFunc   stmtFunc  ) = codeGenStmtFunc stmtFunc
 codeGenStmt (Ast.StmtClass  stmtClass ) = codeGenStmtClass stmtClass
+codeGenStmt (Ast.StmtWhile  stmtWhile ) = codeGenStmtWhile stmtWhile
 codeGenStmt (Ast.StmtBlock  stmtBlock ) = codeGenStmtBlock stmtBlock
 codeGenStmt (Ast.StmtVardec stmtVardec) = codeGenStmtDecvar stmtVardec
 codeGenStmt (Ast.StmtAssign stmtAssign) = codeGenStmtAssign stmtAssign
@@ -218,6 +235,12 @@ codeGenStmtIf stmtIf = do
     let thenPartCfg = assumeIfTaken `Cfg.concat` thenPart
     let elsePartCfg = assumeIfNotTaken `Cfg.concat` elsePart
     return ((generatedCfg cond) `Cfg.concat` (thenPartCfg `Cfg.parallel` elsePartCfg))
+
+codeGenStmtWhile :: Ast.StmtWhileContent -> CodeGenContext Cfg
+codeGenStmtWhile stmtWhile = do
+    cond <- codeGenExp (Ast.stmtWhileCond stmtWhile)
+    body <- codeGenStmts (Ast.stmtWhileBody stmtWhile)
+    return $ (generatedCfg cond) `Cfg.concat` body
 
 assumeIfTakenGen :: Bitcode.Variable -> Location -> Cfg
 assumeIfTakenGen cond loc = let
