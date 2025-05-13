@@ -362,8 +362,78 @@ codeGenExp (Ast.ExpStr    expStr    ) = return $ codeGenExpStr expStr -- ctx not
 codeGenExp (Ast.ExpVar    expVar    ) = codeGenExpVar expVar
 codeGenExp (Ast.ExpCall   expCall   ) = codeGenExpCall expCall
 codeGenExp (Ast.ExpBinop  expBinop  ) = codeGenExpBinop expBinop
+codeGenExp (Ast.ExpAssign expAssign ) = codeGenExpAssign expAssign
 codeGenExp (Ast.ExpLambda expLambda ) = codeGenExpLambda expLambda
 codeGenExp _                          = return $ GeneratedExp (Cfg.empty defaultLoc) dummyTmpVar dummyActualType
+
+codeGenExpAssignToSimpleVar :: Token.VarName -> Ast.Exp -> CodeGenContext GeneratedExp
+codeGenExpAssignToSimpleVar varName init = do
+    init' <- codeGenExp init
+    ctx <- get;
+    let initCfg = generatedCfg init'
+    let initVariable = generatedValue init'
+    let actualType = inferredActualType init'
+    let fqn = ActualType.toFqn actualType
+    let location' = Token.getVarNameLocation varName
+    let existingVar = SymbolTable.lookupVar varName (symbolTable ctx)
+    let newVariable = Bitcode.SrcVariableCtor $ Bitcode.SrcVariable fqn varName
+    let symbolTable' = SymbolTable.insertVar varName newVariable actualType (symbolTable ctx)
+    let updateSymbolTable = ctx { symbolTable = symbolTable' }
+    let dontChangeCtx = ctx
+    let actualVar = case existingVar of { Nothing -> newVariable; Just (v, _) -> v }
+    put $ case existingVar of { Nothing -> updateSymbolTable; _ -> dontChangeCtx }
+    let cfg = initCfg `Cfg.concat` (createAssignCfg location' actualVar initVariable)
+    return $ GeneratedExp cfg actualVar actualType
+
+codeGenExpAssignToFieldVar :: Ast.VarFieldContent -> Ast.Exp -> CodeGenContext GeneratedExp
+codeGenExpAssignToFieldVar var exp = do
+    exp' <- codeGenExp exp
+    var' <- codeGenExp (Ast.varFieldLhs var)
+    let location' = Ast.varFieldLocation var
+    let lhsVar = generatedValue var'
+    let expVar = generatedValue exp'
+    let fieldName = Ast.varFieldName var
+    let content' = Bitcode.FieldWriteContent lhsVar fieldName expVar
+    let fieldWrite = Bitcode.FieldWrite content'
+    let instruction = Bitcode.Instruction location' fieldWrite
+    let expCfg = generatedCfg exp'
+    let varCfg = generatedCfg var'
+    let cfg = Cfg.atom (Cfg.Node instruction)
+    let finalCfg = expCfg `Cfg.concat` varCfg `Cfg.concat` cfg
+    let actualType = inferredActualType var'
+    return $ GeneratedExp finalCfg lhsVar actualType
+
+codeGenExpAssignToSubscriptVar :: Ast.VarSubscriptContent -> Ast.Exp -> CodeGenContext GeneratedExp
+codeGenExpAssignToSubscriptVar subscriptVar value = do
+    value' <- codeGenExp value
+    index <- codeGenExp (Ast.varSubscriptIdx subscriptVar)
+    lhs <- codeGenExp (Ast.varSubscriptLhs subscriptVar)
+    let valueCfg = generatedCfg value'
+    let indexCfg = generatedCfg index
+    let lhsVar = generatedValue lhs
+    let lhsCfg = generatedCfg lhs
+    let lhsType = inferredActualType lhs
+    let fqn = ActualType.toFqn lhsType
+    let location' = Ast.varSubscriptLocation subscriptVar
+    let varName = Token.VarName $ Token.Named (Fqn.content fqn) location'
+    let output = Bitcode.SrcVariableCtor $ Bitcode.SrcVariable fqn varName
+    let subscriptIdx = generatedValue index
+    let input = generatedValue value'
+    let actualType = inferredActualType value'
+    let content' = Bitcode.SubscriptWriteContent output subscriptIdx input
+    let subscriptWrite = Bitcode.SubscriptWrite content'
+    let instruction = Bitcode.Instruction location' subscriptWrite
+    let cfg = valueCfg `Cfg.concat` indexCfg `Cfg.concat` lhsCfg 
+    let finalCfg = cfg `Cfg.concat` (Cfg.atom (Cfg.Node instruction))
+    return $ GeneratedExp finalCfg lhsVar actualType
+
+codeGenExpAssign' :: Ast.Var -> Ast.Exp -> CodeGenContext GeneratedExp
+codeGenExpAssign' (Ast.VarSimple    v) e = codeGenExpAssignToSimpleVar (Ast.varName v) e
+codeGenExpAssign' (Ast.VarField     v) e = codeGenExpAssignToFieldVar v e
+codeGenExpAssign' (Ast.VarSubscript v) e = codeGenExpAssignToSubscriptVar v e
+
+codeGenExpAssign :: Ast.ExpAssignContent -> CodeGenContext GeneratedExp
+codeGenExpAssign e = codeGenExpAssign' (Ast.expAssignLhs e) (Ast.expAssignRhs e)
 
 codeGenExpBinop :: Ast.ExpBinopContent -> CodeGenContext GeneratedExp
 codeGenExpBinop expBinop = do
