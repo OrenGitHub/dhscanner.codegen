@@ -149,6 +149,44 @@ codeGenStmtMethodSingle stmtMethod = do
     put (ctx { callables = callables' })
     return $ Cfg.empty (Ast.stmtMethodLocation stmtMethod)
 
+codeGenStmtMethodV2 :: Ast.StmtMethodContent -> CodeGenContext ()
+codeGenStmtMethodV2 stmtMethod = do
+    -- instrument a single return variable
+    -- all values returned from the method will assign to it
+    let location = Ast.stmtMethodLocation stmtMethod
+    let returnValueFqn = Fqn "returnValue"
+    let returnValueTmpVar = Bitcode.TmpVariable returnValueFqn location
+    let returnedValue = Bitcode.TmpVariableCtor returnValueTmpVar
+    -- instrument a single return instruction
+    -- note that even void method will instrument this part
+    let returnedContent = Bitcode.ReturnContent (Just returnedValue)
+    let returnInstruction = Bitcode.Instruction location (Bitcode.Return returnedContent)
+    let returnSite = Cfg.atom (Cfg.Node returnInstruction)
+    -- recursive code gen params + body
+    beginScope
+    params' <- codeGenParams (Ast.stmtMethodParams stmtMethod)
+    original <- get
+    put $ original { returnTo = Just returnSite, returnValue = Just returnValueTmpVar }
+    body <- codeGenStmts (Ast.stmtMethodBody stmtMethod)
+    ctx' <- get
+    put $ ctx' { returnTo = returnTo original, returnValue = returnValue original }
+    endScope
+    ctx <- get
+    let hostingClass = (Ast.hostingClassName stmtMethod)
+    let rawClassName = Token.getClassNameToken hostingClass
+    let emptyDataMembers = ActualType.DataMembers Data.Set.empty
+    let emptyMethods = ActualType.Methods Data.Map.empty
+    let emptySupers = ActualType.Supers Data.Set.empty
+    let classType = ActualType.Class (ActualType.ClassContent hostingClass emptySupers emptyMethods emptyDataMembers)
+    let classVar = Bitcode.SrcVariableCtor $ Bitcode.SrcVariable (Fqn (Token.content rawClassName)) (Token.VarName rawClassName)
+    let symbolTable' = SymbolTable.insertClass hostingClass classVar classType (symbolTable ctx)
+    let symbolTable'' = case SymbolTable.lookupVar (Token.VarName rawClassName) (symbolTable ctx) of {
+        Nothing -> symbolTable';
+        _ -> (symbolTable ctx)
+    }
+    let callables' = (stmtMethodToCallable stmtMethod symbolTable' (Cfg.concat params' body)) : (callables ctx)
+    put (ctx { callables = callables', symbolTable = symbolTable'' })
+
 codeGenStmtMethod :: Ast.StmtMethodContent -> CodeGenContext ()
 codeGenStmtMethod stmtMethod = do
     beginScope
