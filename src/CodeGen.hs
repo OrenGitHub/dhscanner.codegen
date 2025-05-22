@@ -600,10 +600,10 @@ nondet varName = let
     rawName = Token.content (Token.getVarNameToken varName)
     nondetFunc = Token.VarName (Token.Named "nondet" location')
     arbitraryValue = Token.VarName (Token.Named "arbitrary_value" location')
-    callee = Bitcode.SrcVariableCtor $ Bitcode.SrcVariable Fqn.nativeStr nondetFunc
-    output = Bitcode.SrcVariableCtor $ Bitcode.SrcVariable (Fqn rawName) arbitraryValue
-    call = Bitcode.Call (Bitcode.CallContent output callee [] location')
-    instruction = Bitcode.Instruction location' call
+    unresolvedRefInput = Bitcode.SrcVariableCtor $ Bitcode.SrcVariable (Fqn rawName) varName
+    output = Bitcode.SrcVariableCtor $ Bitcode.SrcVariable (Fqn rawName) varName
+    unresolvedRef = Bitcode.UnresolvedRef (Bitcode.UnresolvedRefContent output unresolvedRefInput location')
+    instruction = Bitcode.Instruction location' unresolvedRef
     cfg = Cfg.atom (Cfg.Node instruction)
     in GeneratedExp cfg output (ActualType.ThirdPartyImport (ActualType.ThirdPartyImportContent "KOKO77777"))
 
