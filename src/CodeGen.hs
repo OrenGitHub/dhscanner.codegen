@@ -78,7 +78,7 @@ codeGenRoot = codeGenStmtsPart . Ast.stmts
 
 codeGenStmtsPart :: [ Ast.Stmt ] -> CodeGenContext ()
 codeGenStmtsPart stmts = do
-    scriptCfg <- codeGenStmts stmts -- script part
+    scriptCfg <- codeGenStmts defaultLoc stmts -- script part
     ctx <- get; -- function + lambda callables
     let callables' = (scriptToCallable scriptCfg) : (callables ctx) -- combine
     put $ ctx { callables = callables' } -- write back to state
@@ -90,7 +90,7 @@ codeGenStmtClass stmtClass = do
     codeGenDataMembers (Ast.stmtClassDataMembers stmtClass)
     codeGenMethods (Ast.stmtClassMethods stmtClass)
     endScope
-    return $ Cfg.empty defaultLoc
+    return $ Cfg.empty (Token.getClassNameLocation (Ast.stmtClassName stmtClass))
 
 insertSelf :: Token.ClassName -> CodeGenContext ()
 insertSelf className' = do
@@ -140,8 +140,8 @@ codeGenStmtMethodSingle :: Ast.StmtMethodContent -> CodeGenContext Cfg
 codeGenStmtMethodSingle stmtMethod = do
     insertEmptyClass (Ast.hostingClassName stmtMethod)
     beginScope
-    params' <- codeGenParams (Ast.stmtMethodParams stmtMethod)
-    body <- codeGenStmts (Ast.stmtMethodBody stmtMethod)
+    params' <- codeGenParams (Ast.stmtMethodLocation stmtMethod) (Ast.stmtMethodParams stmtMethod)
+    body <- codeGenStmts (Ast.stmtMethodLocation stmtMethod) (Ast.stmtMethodBody stmtMethod)
     endScope
     ctx <- get
     let symbolTable' = symbolTable ctx
@@ -164,10 +164,10 @@ codeGenStmtMethodV2 stmtMethod = do
     let returnSite = Cfg.atom (Cfg.Node returnInstruction)
     -- recursive code gen params + body
     beginScope
-    params' <- codeGenParams (Ast.stmtMethodParams stmtMethod)
+    params' <- codeGenParams (Ast.stmtMethodLocation stmtMethod) (Ast.stmtMethodParams stmtMethod)
     original <- get
     put $ original { returnTo = Just returnSite, returnValue = Just returnValueTmpVar }
-    body <- codeGenStmts (Ast.stmtMethodBody stmtMethod)
+    body <- codeGenStmts (Ast.stmtMethodLocation stmtMethod) (Ast.stmtMethodBody stmtMethod)
     ctx' <- get
     put $ ctx' { returnTo = returnTo original, returnValue = returnValue original }
     endScope
@@ -190,8 +190,8 @@ codeGenStmtMethodV2 stmtMethod = do
 codeGenStmtMethod :: Ast.StmtMethodContent -> CodeGenContext ()
 codeGenStmtMethod stmtMethod = do
     beginScope
-    params' <- codeGenParams (Ast.stmtMethodParams stmtMethod)
-    body <- codeGenStmts (Ast.stmtMethodBody stmtMethod)
+    params' <- codeGenParams (Ast.stmtMethodLocation stmtMethod) (Ast.stmtMethodParams stmtMethod)
+    body <- codeGenStmts (Ast.stmtMethodLocation stmtMethod) (Ast.stmtMethodBody stmtMethod)
     endScope
     ctx <- get
     let hostingClass = (Ast.hostingClassName stmtMethod)
@@ -206,19 +206,15 @@ codeGenStmtMethod stmtMethod = do
         Nothing -> symbolTable';
         _ -> (symbolTable ctx)
     }
-    let callables' = (stmtMethodToCallable stmtMethod symbolTable' (Cfg.concat params' body)) : (callables ctx)
+    let location = Ast.stmtMethodLocation stmtMethod
+    let nop = Bitcode.Instruction location Bitcode.Nop
+    let entrypoint = Cfg.atom (Cfg.Node nop)
+    let cfg = Cfg.concat entrypoint (Cfg.concat params' body)
+    let callables' = (stmtMethodToCallable stmtMethod symbolTable' cfg) : (callables ctx)
     put (ctx { callables = callables', symbolTable = symbolTable'' })
 
--- | this function is called in two scenarios:
---
--- * codegen of the script part of the file
---
--- * codegen for the body of a callable
---
--- in either case, it returns the cfg, and accummulates callables
--- (and other info) to the state
-codeGenStmts :: [ Ast.Stmt ] -> CodeGenContext Cfg 
-codeGenStmts stmts = do { cfgs <- codeGenStmts' stmts; return $ foldl' Cfg.concat (Cfg.empty defaultLoc) cfgs }
+codeGenStmts :: Location -> [ Ast.Stmt ] -> CodeGenContext Cfg 
+codeGenStmts loc stmts = do { cfgs <- codeGenStmts' stmts; return $ foldl' Cfg.concat (Cfg.empty loc) cfgs }
 
 codeGenStmts' :: [ Ast.Stmt ] -> CodeGenContext [ Cfg ]
 codeGenStmts' = mapM codeGenStmt
@@ -243,7 +239,7 @@ codeGenStmtExp :: Ast.Exp -> CodeGenContext Cfg
 codeGenStmtExp e = do { e' <- codeGenExp e; return $ generatedCfg e' }
 
 codeGenStmtBlock :: Ast.StmtBlockContent -> CodeGenContext Cfg
-codeGenStmtBlock = codeGenStmts . Ast.stmtBlockContent
+codeGenStmtBlock block = codeGenStmts (Ast.stmtBlockLocation block) (Ast.stmtBlockContent block)
 
 codeGenStmtReturnNothing :: Ast.StmtReturnContent -> CodeGenContext Cfg
 codeGenStmtReturnNothing stmtReturn = do
@@ -270,8 +266,8 @@ codeGenStmtReturn stmtReturn = case (Ast.stmtReturnValue stmtReturn) of
 codeGenStmtIf :: Ast.StmtIfContent -> CodeGenContext Cfg
 codeGenStmtIf stmtIf = do
     cond <- codeGenExp (Ast.stmtIfCond stmtIf)
-    thenPart <- codeGenStmts (Ast.stmtIfBody stmtIf)
-    elsePart <- codeGenStmts (Ast.stmtElseBody stmtIf)
+    thenPart <- codeGenStmts (Ast.stmtIfLocation stmtIf) (Ast.stmtIfBody stmtIf)
+    elsePart <- codeGenStmts (Ast.stmtIfLocation stmtIf) (Ast.stmtElseBody stmtIf)
     let assumeIfTaken = assumeIfTakenGen (generatedValue cond) (Ast.stmtIfLocation stmtIf)
     let assumeIfNotTaken = assumeIfNotTakenGen (generatedValue cond) (Ast.stmtIfLocation stmtIf)
     let thenPartCfg = assumeIfTaken `Cfg.concat` thenPart
@@ -281,7 +277,7 @@ codeGenStmtIf stmtIf = do
 codeGenStmtWhile :: Ast.StmtWhileContent -> CodeGenContext Cfg
 codeGenStmtWhile stmtWhile = do
     cond <- codeGenExp (Ast.stmtWhileCond stmtWhile)
-    body <- codeGenStmts (Ast.stmtWhileBody stmtWhile)
+    body <- codeGenStmts (Ast.stmtWhileLocation stmtWhile) (Ast.stmtWhileBody stmtWhile)
     return $ (generatedCfg cond) `Cfg.concat` body
 
 assumeIfTakenGen :: Bitcode.Variable -> Location -> Cfg
@@ -317,8 +313,8 @@ codeGenStmtFunc :: Ast.StmtFuncContent -> CodeGenContext Cfg
 codeGenStmtFunc stmtFunc = do
     annotations <- codeGenAnnotations (Ast.stmtFuncAnnotations stmtFunc)
     beginScope
-    params' <- codeGenParams (Ast.stmtFuncParams stmtFunc)
-    body <- codeGenStmts (Ast.stmtFuncBody stmtFunc)
+    params' <- codeGenParams (Ast.stmtFuncLocation stmtFunc) (Ast.stmtFuncParams stmtFunc)
+    body <- codeGenStmts (Ast.stmtFuncLocation stmtFunc) (Ast.stmtFuncBody stmtFunc)
     endScope
     ctx <- get
     let callable = decFuncToCallable stmtFunc (Cfg.concat params' body) annotations
@@ -512,7 +508,7 @@ endScope   = do { ctx <- get; put $ ctx { symbolTable = SymbolTable.endScope   (
 handleLambda :: Ast.ExpLambdaContent -> CodeGenContext Callable
 handleLambda lambda = do
     paramDeclsCfg <- codeGenLambdaParams lambda
-    lambdaBodyCfg <- codeGenStmts (Ast.expLambdaBody lambda)
+    lambdaBodyCfg <- codeGenStmts (Ast.expLambdaLocation lambda) (Ast.expLambdaBody lambda)
     return $ lambdaToCallable (Cfg.concat paramDeclsCfg lambdaBodyCfg) (Ast.expLambdaLocation lambda)
 
 handleLambdaCallable :: Ast.ExpLambdaContent -> CodeGenContext Callable
@@ -523,12 +519,12 @@ insertLambdaCallable :: Ast.ExpLambdaContent -> CodeGenContext ()
 insertLambdaCallable expLambda = do { c <- handleLambdaCallable expLambda; ctx <- get; put $ ctx { callables = c:(callables ctx) } }
 
 codeGenLambdaParams :: Ast.ExpLambdaContent -> CodeGenContext Cfg
-codeGenLambdaParams = codeGenParams . Ast.expLambdaParams
+codeGenLambdaParams lambda = codeGenParams (Ast.expLambdaLocation lambda) (Ast.expLambdaParams lambda)
 
-codeGenParams :: [ Ast.Param ] -> CodeGenContext Cfg
-codeGenParams params' = do
+codeGenParams :: Location -> [ Ast.Param ] -> CodeGenContext Cfg
+codeGenParams loc params' = do
     cfgs <- codeGenParams' 0 params'
-    return $ foldl' Cfg.concat (Cfg.empty defaultLoc) cfgs
+    return $ foldl' Cfg.concat (Cfg.empty loc) cfgs
 
 codeGenParams' :: Word -> [ Ast.Param ] -> CodeGenContext [ Cfg ]
 codeGenParams' _ [] = return []
