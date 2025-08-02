@@ -119,9 +119,12 @@ lookupSuperType super table = case lookup' (Token.content $ Token.getSuperNameTo
     Just (_, actualType) -> Just actualType
 
 lookupNominalType :: Token.NominalTy -> SymbolTable -> ActualType
-lookupNominalType t table = case lookup' (Token.content $ Token.getNominalTyToken t) (scopes table) of
-    Nothing -> ActualType.Any
-    Just (_, actualType) -> actualType
+lookupNominalType t table = let
+    name = (Token.content $ Token.getNominalTyToken t)
+    in case lookup' name (scopes table) of {
+        Nothing -> ActualType.ThirdPartyImport (ActualType.ThirdPartyImportContent name);
+        Just (_, actualType) -> actualType
+    }
 
 -- Internal (recursive) lookup
 -- The scopes list starts with the /innermost/ scope
