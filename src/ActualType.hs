@@ -21,13 +21,13 @@ import GHC.Generics
 
 data ActualType
    = Any
-   | Require -- ^ for javascript
    | NativeTypeInt
    | NativeTypeStr
    | NativeTypeBool
    | NativeTypeConstInt Int
    | NativeTypeConstStr String
-   | NativeTypeConstBool
+   | NativeTypeConstBool Bool
+   | NativeTypeConstNull
    | Class ClassContent
    | Lambda LambdaContent
    | Method MethodContent
@@ -67,7 +67,7 @@ data Supers
 data DataMember
    = DataMember
      {
-         dataMemberName :: Token.MembrName,
+         dataMemberName :: Token.MemberName,
          dataMemberType :: ActualType
      }
      deriving ( Show, Eq, Ord, Generic )
@@ -124,7 +124,7 @@ data FunctionContent
 data MethodContent
    = MethodContent
      {
-         methodName :: Token.MethdName,
+         methodName :: Token.MethodName,
          methodParams :: Params
      }
      deriving ( Show, Eq, Ord, Generic )

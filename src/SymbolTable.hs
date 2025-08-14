@@ -62,14 +62,11 @@ createSubprocessPython = ActualType.ThirdPartyImport $ ActualType.ThirdPartyImpo
 
 runtimeScope :: Scope
 runtimeScope = let
-    jsloc = Location "nodejs" 0 0 0 0 -- for native nodejs functions
     pyloc = Location "python" 0 0 0 0 -- for native python functions
     location' = Location "fstring" 0 0 0 0 -- instrumented format string function
-    varNameRequire          = Token.VarName (Token.Named "require" jsloc)
     varNameFstring          = Token.VarName (Token.Named "fstring" location')
     varNameOsPython         = Token.VarName (Token.Named "python.os" pyloc)
     varNameSubprocessPython = Token.VarName (Token.Named "python.subprocess" pyloc)
-    requireSpecialVar   = Bitcode.SrcVariableCtor $ Bitcode.SrcVariable (Fqn "nodejs.require")    varNameRequire
     fstringSpecialVar   = Bitcode.SrcVariableCtor $ Bitcode.SrcVariable (Fqn "fstring")           varNameFstring
     osPythonVar         = Bitcode.SrcVariableCtor $ Bitcode.SrcVariable (Fqn "python.os")         varNameOsPython
     subprocessPythonVar = Bitcode.SrcVariableCtor $ Bitcode.SrcVariable (Fqn "python.subprocess") varNameSubprocessPython
@@ -77,11 +74,10 @@ runtimeScope = let
     fstringFunc = createFstringFunc fstringFuncName
     osPython = createOsPython
     subprocessPython = createSubprocessPython
-    require    = ("require",    (requireSpecialVar,   ActualType.Require))
     fstring    = ("fstring",    (fstringSpecialVar,   fstringFunc))
     os         = ("os",         (osPythonVar,         osPython)) 
     subprocess = ("subprocess", (subprocessPythonVar, subprocessPython)) 
-    in Scope $ Data.Map.fromList [ require, fstring, os, subprocess ]
+    in Scope $ Data.Map.fromList [ fstring, os, subprocess ]
 
 emptySymbolTable :: SymbolTable
 emptySymbolTable = SymbolTable { scopes = [ runtimeScope ] }
@@ -102,25 +98,38 @@ varExists :: Token.VarName -> SymbolTable -> Bool
 varExists v table = varExists' (Token.content (Token.getVarNameToken v)) (scopes table)
 
 insertVar :: Token.VarName -> Bitcode.Variable -> ActualType -> SymbolTable -> SymbolTable
-insertVar name v t = insert (Token.getVarNameToken name) v t
+insertVar name = insert (Token.getVarNameToken name)
 
 insertClass :: Token.ClassName -> Bitcode.Variable -> ActualType -> SymbolTable -> SymbolTable
-insertClass name v t = insert (Token.getClassNameToken name) v t
+insertClass name = insert (Token.getClassNameToken name)
 
-insertParam:: Token.ParamName -> Bitcode.Variable -> ActualType -> SymbolTable -> SymbolTable
-insertParam name v t = insert (Token.getParamNameToken name) v t
+insertParam :: Token.ParamName -> Bitcode.Variable -> ActualType -> SymbolTable -> SymbolTable
+insertParam name = insert (Token.getParamNameToken name)
 
 lookupVar :: Token.VarName -> SymbolTable -> Maybe (Bitcode.Variable, ActualType)
 lookupVar v table = lookup' (Token.content $ Token.getVarNameToken v) (scopes table)
+
+actualTypeOrAny :: Maybe (Bitcode.Variable, ActualType) -> ActualType
+actualTypeOrAny (Just (_, actualType)) = actualType
+actualTypeOrAny Nothing = ActualType.ThirdPartyImport (ActualType.ThirdPartyImportContent "MOSHIK")
+
+-- self is an instrumented var, inserted while handling python classes
+-- this call should normally return a Just type, and returning a Nothing
+-- clearly indicates something bad happened
+lookupSelf :: SymbolTable -> Maybe (Bitcode.Variable, ActualType)
+lookupSelf table = lookup' "self" (scopes table)
+
+lookupSelfOrAny :: SymbolTable -> ActualType
+lookupSelfOrAny = actualTypeOrAny . lookupSelf
 
 lookupSuperType :: Token.SuperName -> SymbolTable -> Maybe ActualType
 lookupSuperType super table = case lookup' (Token.content $ Token.getSuperNameToken super) (scopes table) of
     Nothing -> Nothing
     Just (_, actualType) -> Just actualType
 
-lookupNominalType :: Token.NominalTy -> SymbolTable -> ActualType
+lookupNominalType :: Token.Named -> SymbolTable -> ActualType
 lookupNominalType t table = let
-    name = (Token.content $ Token.getNominalTyToken t)
+    name = Token.content t
     in case lookup' name (scopes table) of {
         Nothing -> ActualType.ThirdPartyImport (ActualType.ThirdPartyImportContent name);
         Just (_, actualType) -> actualType
