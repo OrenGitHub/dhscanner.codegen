@@ -22,7 +22,6 @@ import qualified SymbolTable
 
 -- general imports
 import Data.Maybe
-import Control.Monad ((=<<))
 import Data.List hiding ( init )
 import Prelude hiding ( exp, init )
 import Control.Monad.State.Lazy
@@ -101,10 +100,10 @@ insertSelf name = do
     let classFqn = Fqn (Token.content classNameToken)
     let selfSrcVar = Bitcode.SrcVariable classFqn selfVarName
     let selfVar = Bitcode.SrcVariableCtor selfSrcVar
-    let dataMembers = ActualType.DataMembers Data.Set.empty
-    let methods = ActualType.Methods Data.Map.empty
-    let supers = ActualType.Supers Data.Set.empty
-    let actualType = ActualType.Class (ActualType.ClassContent name supers methods dataMembers)
+    let dataMembers' = ActualType.DataMembers Data.Set.empty
+    let methods' = ActualType.Methods Data.Map.empty
+    let supers' = ActualType.Supers Data.Set.empty
+    let actualType = ActualType.Class (ActualType.ClassContent name supers' methods' dataMembers')
     let symbolTable' = SymbolTable.insertVar selfVarName selfVar actualType (symbolTable ctx)
     put $ ctx { symbolTable = symbolTable' }
 
@@ -118,9 +117,9 @@ codeGenMethods' :: [ Ast.StmtMethodContent ] -> CodeGenContext ()
 codeGenMethods' = mapM_ codeGenStmtMethod
 
 insertEmptyClass :: Token.ClassName -> CodeGenContext ()
-insertEmptyClass className = do
+insertEmptyClass name = do
     ctx <- get
-    let classNameToken = Token.getClassNameToken className
+    let classNameToken = Token.getClassNameToken name
     let classVarName = Token.VarName classNameToken
     let classFqn = Fqn (Token.content classNameToken)
     let classSrcVar = Bitcode.SrcVariable classFqn classVarName
@@ -128,8 +127,8 @@ insertEmptyClass className = do
     let emptyDataMembers = ActualType.DataMembers Data.Set.empty
     let emptyMethods = ActualType.Methods Data.Map.empty
     let emptySupers = ActualType.Supers Data.Set.empty
-    let actualType = ActualType.Class (ActualType.ClassContent className emptySupers emptyMethods emptyDataMembers)
-    let symbolTable' = SymbolTable.insertClass className classVar actualType (symbolTable ctx)
+    let actualType = ActualType.Class (ActualType.ClassContent name emptySupers emptyMethods emptyDataMembers)
+    let symbolTable' = SymbolTable.insertClass name classVar actualType (symbolTable ctx)
     put $ ctx { symbolTable = symbolTable' }
 
 codeGenStmtMethodSingle :: Ast.StmtMethodContent -> CodeGenContext Cfg
@@ -149,14 +148,14 @@ codeGenStmtMethodV2 :: Ast.StmtMethodContent -> CodeGenContext ()
 codeGenStmtMethodV2 stmtMethod = do
     -- instrument a single return variable
     -- all values returned from the method will assign to it
-    let location = Ast.stmtMethodLocation stmtMethod
+    let location' = Ast.stmtMethodLocation stmtMethod
     let returnValueFqn = Fqn "returnValue"
-    let returnValueTmpVar = Bitcode.TmpVariable returnValueFqn location
+    let returnValueTmpVar = Bitcode.TmpVariable returnValueFqn location'
     let returnedValue = Bitcode.TmpVariableCtor returnValueTmpVar
     -- instrument a single return instruction
     -- note that even void method will instrument this part
     let returnedContent = Bitcode.ReturnContent (Just returnedValue)
-    let returnInstruction = Bitcode.Instruction location (Bitcode.Return returnedContent)
+    let returnInstruction = Bitcode.Instruction location' (Bitcode.Return returnedContent)
     let returnSite = Cfg.atom (Cfg.Node returnInstruction)
     -- recursive code gen params + body
     beginScope
@@ -202,8 +201,8 @@ codeGenStmtMethod stmtMethod = do
         Nothing -> symbolTable';
         _ -> (symbolTable ctx)
     }
-    let location = Ast.stmtMethodLocation stmtMethod
-    let nop = Bitcode.Instruction location Bitcode.Nop
+    let location' = Ast.stmtMethodLocation stmtMethod
+    let nop = Bitcode.Instruction location' Bitcode.Nop
     let entrypoint = Cfg.atom (Cfg.Node nop)
     let cfg = Cfg.concat entrypoint (Cfg.concat params' body)
     let callables' = (stmtMethodToCallable stmtMethod symbolTable' cfg) : (callables ctx)
@@ -409,6 +408,7 @@ codeGenExp (Ast.ExpNull   expNull   ) = pure $ codeGenExpNull expNull
 codeGenExp (Ast.ExpVar    expVar    ) = codeGenExpVar expVar
 codeGenExp (Ast.ExpCall   expCall   ) = codeGenExpCall expCall
 codeGenExp (Ast.ExpBinop  expBinop  ) = codeGenExpBinop expBinop
+codeGenExp (Ast.ExpKwArg  expKwArg  ) = codeGenExpKwArg expKwArg
 codeGenExp (Ast.ExpAssign expAssign ) = codeGenExpAssign expAssign
 codeGenExp (Ast.ExpLambda expLambda ) = codeGenExpLambda expLambda
 
@@ -480,6 +480,9 @@ codeGenExpAssign' (Ast.VarSubscript v) e = codeGenExpAssignToSubscriptVar v e
 
 codeGenExpAssign :: Ast.ExpAssignContent -> CodeGenContext GeneratedExp
 codeGenExpAssign e = codeGenExpAssign' (Ast.expAssignLhs e) (Ast.expAssignRhs e)
+
+codeGenExpKwArg :: Ast.ExpKwArgContent -> CodeGenContext GeneratedExp
+codeGenExpKwArg = codeGenExp . Ast.expKwArgValue
 
 codeGenExpBinop :: Ast.ExpBinopContent -> CodeGenContext GeneratedExp
 codeGenExpBinop expBinop = do
@@ -612,8 +615,6 @@ nondet :: Token.VarName -> GeneratedExp
 nondet varName = let
     location' = Token.getVarNameLocation varName
     rawName = Token.content (Token.getVarNameToken varName)
-    nondetFunc = Token.VarName (Token.Named "nondet" location')
-    arbitraryValue = Token.VarName (Token.Named "arbitrary_value" location')
     unresolvedRefInput = Bitcode.SrcVariableCtor $ Bitcode.SrcVariable (Fqn rawName) varName
     output = Bitcode.SrcVariableCtor $ Bitcode.SrcVariable (Fqn rawName) varName
     unresolvedRef = Bitcode.UnresolvedRef (Bitcode.UnresolvedRefContent output unresolvedRefInput location')
@@ -940,19 +941,19 @@ decFuncToCallable stmtFunc cfg annotations = let
     in Callable.Function content'
 
 fqnify :: SymbolTable -> [ Token.SuperName ] -> [ Fqn ]
-fqnify symbolTable = Data.List.map (fqnify' symbolTable)
+fqnify = Data.List.map . fqnify'
 
 fqnify' :: SymbolTable -> Token.SuperName -> Fqn
-fqnify' symbolTable superName = let
-    actualType = SymbolTable.lookupSuperType superName symbolTable
+fqnify' symbolTable' superName = let
+    actualType = SymbolTable.lookupSuperType superName symbolTable'
     in case actualType of
         Nothing -> Fqn (Token.content (Token.getSuperNameToken superName))
         Just actualType' -> toFqn actualType'
 
 stmtMethodToCallable :: Ast.StmtMethodContent -> SymbolTable -> Cfg -> Callable
-stmtMethodToCallable stmtMethod symbolTable cfg = let
+stmtMethodToCallable stmtMethod symbolTable' cfg = let
     hostingClassName' = Ast.hostingClassName stmtMethod
-    hostingClassSupers' = fqnify symbolTable (Ast.hostingClassSupers stmtMethod)
+    hostingClassSupers' = fqnify symbolTable' (Ast.hostingClassSupers stmtMethod)
     stmtMethodName' = Ast.stmtMethodName stmtMethod
     location' = Ast.stmtMethodLocation stmtMethod
     content' = Callable.MethodContent stmtMethodName' hostingClassName' hostingClassSupers' cfg location'

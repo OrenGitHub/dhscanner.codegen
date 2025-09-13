@@ -23,7 +23,7 @@ extra-doc-files: CHANGELOG.md
 
 common ghc_options
     
-    ghc-options: -Wall -O2
+    ghc-options: -Wall -Werror -O2
 
 executable codegen
 
