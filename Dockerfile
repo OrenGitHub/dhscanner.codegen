@@ -1,4 +1,4 @@
-FROM haskell:9.4.8
+FROM haskell:9.6.7
 WORKDIR /codegen
 COPY dhscanner.cabal dhscanner.cabal
 RUN cabal update
