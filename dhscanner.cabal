@@ -39,8 +39,8 @@ executable codegen
     build-depends:
         base,
         containers,
-        dhscanner-ast >= 1.1.1,
-        dhscanner-bitcode >= 1.0.7,
+        dhscanner-ast >= 1.1.2,
+        dhscanner-bitcode >= 1.0.9,
         yesod-core,
         http-types,
         fast-logger,

@@ -48,7 +48,7 @@ data GeneratedExp
    = GeneratedExp
      {
          generatedCfg :: Cfg,
-         generatedValue :: Bitcode.Variable,
+         generatedValue :: Bitcode.Value,
          inferredActualType :: ActualType
      }
      deriving ( Show )
@@ -74,13 +74,10 @@ codeGen :: Ast.Root -> Callables
 codeGen ast = Callables (callables (execState (codeGenRoot ast) initCodeGenState))
 
 codeGenRoot :: Ast.Root -> CodeGenContext ()
-codeGenRoot = codeGenStmtsPart . Ast.stmts
-
-codeGenStmtsPart :: [ Ast.Stmt ] -> CodeGenContext ()
-codeGenStmtsPart stmts = do
-    scriptCfg <- codeGenStmts defaultLoc stmts -- script part
+codeGenRoot (Ast.Root filename' stmts) = do
+    scriptCfg <- codeGenStmts stmts -- script part
     ctx <- get; -- function + lambda callables
-    let callables' = (scriptToCallable scriptCfg) : (callables ctx) -- combine
+    let callables' = scriptToCallable filename' scriptCfg : callables ctx -- combine
     put $ ctx { callables = callables' } -- write back to state
 
 codeGenStmtClass :: Ast.StmtClassContent -> CodeGenContext Cfg
@@ -90,7 +87,7 @@ codeGenStmtClass stmtClass = do
     codeGenDataMembers (Ast.stmtClassDataMembers stmtClass)
     codeGenMethods (Ast.stmtClassMethods stmtClass)
     endScope
-    return $ Cfg.empty (Token.getClassNameLocation (Ast.stmtClassName stmtClass))
+    return Cfg.Empty
 
 insertSelf :: Token.ClassName -> CodeGenContext ()
 insertSelf name = do
@@ -135,14 +132,14 @@ codeGenStmtMethodSingle :: Ast.StmtMethodContent -> CodeGenContext Cfg
 codeGenStmtMethodSingle stmtMethod = do
     insertEmptyClass (Ast.hostingClassName stmtMethod)
     beginScope
-    params' <- codeGenParams (Ast.stmtMethodLocation stmtMethod) (Ast.stmtMethodParams stmtMethod)
-    body <- codeGenStmts (Ast.stmtMethodLocation stmtMethod) (Ast.stmtMethodBody stmtMethod)
+    params' <- codeGenParams (Ast.stmtMethodParams stmtMethod)
+    body <- codeGenStmts (Ast.stmtMethodBody stmtMethod)
     endScope
     ctx <- get
     let symbolTable' = symbolTable ctx
     let callables' = (stmtMethodToCallable stmtMethod symbolTable' (Cfg.concat params' body)) : (callables ctx)
     put (ctx { callables = callables' })
-    return $ Cfg.empty (Ast.stmtMethodLocation stmtMethod)
+    return Cfg.Empty
 
 codeGenStmtMethodV2 :: Ast.StmtMethodContent -> CodeGenContext ()
 codeGenStmtMethodV2 stmtMethod = do
@@ -151,23 +148,23 @@ codeGenStmtMethodV2 stmtMethod = do
     let location' = Ast.stmtMethodLocation stmtMethod
     let returnValueFqn = Fqn "returnValue"
     let returnValueTmpVar = Bitcode.TmpVariable returnValueFqn location'
-    let returnedValue = Bitcode.TmpVariableCtor returnValueTmpVar
+    let returnedValue = Bitcode.VariableCtor (Bitcode.TmpVariableCtor returnValueTmpVar)
     -- instrument a single return instruction
     -- note that even void method will instrument this part
     let returnedContent = Bitcode.ReturnContent (Just returnedValue)
     let returnInstruction = Bitcode.Instruction location' (Bitcode.Return returnedContent)
-    let returnSite = Cfg.atom (Cfg.Node returnInstruction)
+    let returnSite = Cfg.Normal (Cfg.atom (Cfg.Node returnInstruction))
     -- recursive code gen params + body
     beginScope
-    params' <- codeGenParams (Ast.stmtMethodLocation stmtMethod) (Ast.stmtMethodParams stmtMethod)
+    params' <- codeGenParams (Ast.stmtMethodParams stmtMethod)
     original <- get
     put $ original { returnTo = Just returnSite, returnValue = Just returnValueTmpVar }
-    body <- codeGenStmts (Ast.stmtMethodLocation stmtMethod) (Ast.stmtMethodBody stmtMethod)
+    body <- codeGenStmts (Ast.stmtMethodBody stmtMethod)
     ctx' <- get
     put $ ctx' { returnTo = returnTo original, returnValue = returnValue original }
     endScope
     ctx <- get
-    let hostingClass = (Ast.hostingClassName stmtMethod)
+    let hostingClass = Ast.hostingClassName stmtMethod
     let rawClassName = Token.getClassNameToken hostingClass
     let emptyDataMembers = ActualType.DataMembers Data.Set.empty
     let emptyMethods = ActualType.Methods Data.Map.empty
@@ -177,7 +174,7 @@ codeGenStmtMethodV2 stmtMethod = do
     let symbolTable' = SymbolTable.insertClass hostingClass classVar classType (symbolTable ctx)
     let symbolTable'' = case SymbolTable.lookupVar (Token.VarName rawClassName) (symbolTable ctx) of {
         Nothing -> symbolTable';
-        _ -> (symbolTable ctx)
+        _ -> symbolTable ctx
     }
     let callables' = (stmtMethodToCallable stmtMethod symbolTable' (Cfg.concat params' body)) : (callables ctx)
     put (ctx { callables = callables', symbolTable = symbolTable'' })
@@ -185,11 +182,11 @@ codeGenStmtMethodV2 stmtMethod = do
 codeGenStmtMethod :: Ast.StmtMethodContent -> CodeGenContext ()
 codeGenStmtMethod stmtMethod = do
     beginScope
-    params' <- codeGenParams (Ast.stmtMethodLocation stmtMethod) (Ast.stmtMethodParams stmtMethod)
-    body <- codeGenStmts (Ast.stmtMethodLocation stmtMethod) (Ast.stmtMethodBody stmtMethod)
+    params' <- codeGenParams (Ast.stmtMethodParams stmtMethod)
+    body <- codeGenStmts (Ast.stmtMethodBody stmtMethod)
     endScope
     ctx <- get
-    let hostingClass = (Ast.hostingClassName stmtMethod)
+    let hostingClass = Ast.hostingClassName stmtMethod
     let rawClassName = Token.getClassNameToken hostingClass
     let emptyDataMembers = ActualType.DataMembers Data.Set.empty
     let emptyMethods = ActualType.Methods Data.Map.empty
@@ -199,17 +196,17 @@ codeGenStmtMethod stmtMethod = do
     let symbolTable' = SymbolTable.insertClass hostingClass classVar classType (symbolTable ctx)
     let symbolTable'' = case SymbolTable.lookupVar (Token.VarName rawClassName) (symbolTable ctx) of {
         Nothing -> symbolTable';
-        _ -> (symbolTable ctx)
+        _ -> symbolTable ctx
     }
     let location' = Ast.stmtMethodLocation stmtMethod
     let nop = Bitcode.Instruction location' Bitcode.Nop
-    let entrypoint = Cfg.atom (Cfg.Node nop)
+    let entrypoint = Cfg.Normal (Cfg.atom (Cfg.Node nop))
     let cfg = Cfg.concat entrypoint (Cfg.concat params' body)
-    let callables' = (stmtMethodToCallable stmtMethod symbolTable' cfg) : (callables ctx)
+    let callables' = stmtMethodToCallable stmtMethod symbolTable' cfg : callables ctx
     put (ctx { callables = callables', symbolTable = symbolTable'' })
 
-codeGenStmts :: Location -> [ Ast.Stmt ] -> CodeGenContext Cfg
-codeGenStmts loc stmts = do { cfgs <- codeGenStmts' stmts; return $ foldl' Cfg.concat (Cfg.empty loc) cfgs }
+codeGenStmts :: [ Ast.Stmt ] -> CodeGenContext Cfg
+codeGenStmts = fmap (foldl' Cfg.concat Cfg.Empty) . codeGenStmts'
 
 codeGenStmts' :: [ Ast.Stmt ] -> CodeGenContext [ Cfg ]
 codeGenStmts' = mapM codeGenStmt
@@ -228,13 +225,13 @@ codeGenStmt (Ast.StmtAssign stmtAssign) = codeGenStmtAssign stmtAssign
 codeGenStmt (Ast.StmtImport stmtImport) = codeGenStmtImport stmtImport
 codeGenStmt (Ast.StmtReturn stmtReturn) = codeGenStmtReturn stmtReturn
 codeGenStmt (Ast.StmtMethod stmtMethod) = codeGenStmtMethodSingle stmtMethod
-codeGenStmt _                           = return $ Cfg.empty defaultLoc
+codeGenStmt _                           = return Cfg.Empty
 
 codeGenStmtExp :: Ast.Exp -> CodeGenContext Cfg
-codeGenStmtExp e = do { e' <- codeGenExp e; return $ generatedCfg e' }
+codeGenStmtExp = fmap generatedCfg . codeGenExp
 
 codeGenStmtBlock :: Ast.StmtBlockContent -> CodeGenContext Cfg
-codeGenStmtBlock block = codeGenStmts (Ast.stmtBlockLocation block) (Ast.stmtBlockContent block)
+codeGenStmtBlock = codeGenStmts . Ast.stmtBlockContent
 
 codeGenStmtReturnNothing :: Ast.StmtReturnContent -> CodeGenContext Cfg
 codeGenStmtReturnNothing stmtReturn = do
@@ -242,7 +239,7 @@ codeGenStmtReturnNothing stmtReturn = do
     let content' = Bitcode.ReturnContent Nothing
     let returnInstruction = Bitcode.Return content'
     let instruction = Bitcode.Instruction location' returnInstruction
-    return $ Cfg.atom (Cfg.Node instruction)
+    return $ Cfg.Normal (Cfg.atom (Cfg.Node instruction))
 
 codeGenStmtReturnValue :: Location -> Ast.Exp -> CodeGenContext Cfg
 codeGenStmtReturnValue loc exp = do
@@ -250,38 +247,38 @@ codeGenStmtReturnValue loc exp = do
     let content' = Bitcode.ReturnContent (Just (generatedValue returnValue'))
     let returnInstruction = Bitcode.Return content'
     let instruction = Bitcode.Instruction loc returnInstruction
-    let returnCfg = Cfg.atom (Cfg.Node instruction)
-    return $ (generatedCfg returnValue') `Cfg.concat` returnCfg
+    let returnCfg = Cfg.Normal (Cfg.atom (Cfg.Node instruction))
+    return $ generatedCfg returnValue' `Cfg.concat` returnCfg
 
 codeGenStmtReturn :: Ast.StmtReturnContent -> CodeGenContext Cfg
-codeGenStmtReturn stmtReturn = case (Ast.stmtReturnValue stmtReturn) of
+codeGenStmtReturn stmtReturn = case Ast.stmtReturnValue stmtReturn of
     Nothing -> codeGenStmtReturnNothing stmtReturn
     Just returnedValue -> codeGenStmtReturnValue (Ast.stmtReturnLocation stmtReturn) returnedValue
 
 codeGenStmtIf :: Ast.StmtIfContent -> CodeGenContext Cfg
 codeGenStmtIf stmtIf = do
     cond <- codeGenExp (Ast.stmtIfCond stmtIf)
-    thenPart <- codeGenStmts (Ast.stmtIfLocation stmtIf) (Ast.stmtIfBody stmtIf)
-    elsePart <- codeGenStmts (Ast.stmtIfLocation stmtIf) (Ast.stmtElseBody stmtIf)
+    thenPart <- codeGenStmts (Ast.stmtIfBody stmtIf)
+    elsePart <- codeGenStmts (Ast.stmtElseBody stmtIf)
     let assumeIfTaken = assumeIfTakenGen (generatedValue cond) (Ast.stmtIfLocation stmtIf)
     let assumeIfNotTaken = assumeIfNotTakenGen (generatedValue cond) (Ast.stmtIfLocation stmtIf)
-    let thenPartCfg = assumeIfTaken `Cfg.concat` thenPart
-    let elsePartCfg = assumeIfNotTaken `Cfg.concat` elsePart
-    return ((generatedCfg cond) `Cfg.concat` (thenPartCfg `Cfg.parallel` elsePartCfg))
+    let thenPartCfg = assumeIfTaken `Cfg.concatNormalContentFirst` thenPart
+    let elsePartCfg = assumeIfNotTaken `Cfg.concatNormalContentFirst` elsePart
+    return (generatedCfg cond `Cfg.concat` (thenPartCfg `Cfg.parallelNormalCfgs` elsePartCfg))
 
 codeGenStmtWhile :: Ast.StmtWhileContent -> CodeGenContext Cfg
 codeGenStmtWhile stmtWhile = do
     cond <- codeGenExp (Ast.stmtWhileCond stmtWhile)
-    body <- codeGenStmts (Ast.stmtWhileLocation stmtWhile) (Ast.stmtWhileBody stmtWhile)
+    body <- codeGenStmts (Ast.stmtWhileBody stmtWhile)
     return $ (generatedCfg cond) `Cfg.concat` body
 
-assumeIfTakenGen :: Bitcode.Variable -> Location -> Cfg
+assumeIfTakenGen :: Bitcode.Value -> Location -> Cfg.Content
 assumeIfTakenGen cond loc = let
     content' = Bitcode.Assume $ Bitcode.AssumeContent cond True
     instruction = Bitcode.Instruction loc content'
     in Cfg.atom (Cfg.Node instruction)
 
-assumeIfNotTakenGen :: Bitcode.Variable -> Location -> Cfg
+assumeIfNotTakenGen :: Bitcode.Value -> Location -> Cfg.Content
 assumeIfNotTakenGen cond loc = let
     content' = Bitcode.Assume $ Bitcode.AssumeContent cond False
     instruction = Bitcode.Instruction loc content'
@@ -308,12 +305,12 @@ codeGenStmtFunc :: Ast.StmtFuncContent -> CodeGenContext Cfg
 codeGenStmtFunc stmtFunc = do
     annotations <- codeGenAnnotations (Ast.stmtFuncAnnotations stmtFunc)
     beginScope
-    params' <- codeGenParams (Ast.stmtFuncLocation stmtFunc) (Ast.stmtFuncParams stmtFunc)
-    body <- codeGenStmts (Ast.stmtFuncLocation stmtFunc) (Ast.stmtFuncBody stmtFunc)
+    params' <- codeGenParams (Ast.stmtFuncParams stmtFunc)
+    body <- codeGenStmts (Ast.stmtFuncBody stmtFunc)
     endScope
     ctx <- get
     let callable = decFuncToCallable stmtFunc (Cfg.concat params' body) annotations
-    let callables' = callable : (callables ctx)
+    let callables' = callable : callables ctx
     let funcName' = Token.VarName $ Token.getFuncNameToken (Ast.stmtFuncName stmtFunc)
     let funcFqn = Fqn (Token.content (Token.getVarNameToken funcName'))
     let funcVar = Bitcode.SrcVariableCtor $ Bitcode.SrcVariable funcFqn funcName'
@@ -327,7 +324,7 @@ codeGenStmtFunc stmtFunc = do
     let funcType = ActualType.Function funcContent
     let symbolTable' = SymbolTable.insertVar funcName' funcVar funcType (symbolTable ctx)
     put (ctx { symbolTable = symbolTable', callables = callables' })
-    return $ Cfg.empty location'
+    return Cfg.Empty
 
 codeGenStmtImportAll :: String -> Location -> CodeGenContext Cfg
 codeGenStmtImportAll src l = do
@@ -337,7 +334,7 @@ codeGenStmtImportAll src l = do
     let actualType = ActualType.ThirdPartyImport (ActualType.ThirdPartyImportContent src)
     let symbolTable' = SymbolTable.insertVar srcVarName srcVar actualType (symbolTable ctx)
     put $ ctx { symbolTable = symbolTable' }
-    return $ Cfg.empty l
+    return Cfg.Empty
 
 codeGenStmtImportSpecific :: String -> String -> Location -> CodeGenContext Cfg
 codeGenStmtImportSpecific src specific l = do
@@ -347,7 +344,7 @@ codeGenStmtImportSpecific src specific l = do
     let actualType = ActualType.ThirdPartyImport (ActualType.ThirdPartyImportContent (src ++ "." ++ specific))
     let symbolTable' = SymbolTable.insertVar specificVarName specificVar actualType (symbolTable ctx)
     put $ ctx { symbolTable = symbolTable' }
-    return $ Cfg.empty l
+    return Cfg.Empty
 
 codeGenStmtImportSpecificWithAlias :: String -> String -> String -> Location -> CodeGenContext Cfg
 codeGenStmtImportSpecificWithAlias src specific alias l = do
@@ -357,7 +354,7 @@ codeGenStmtImportSpecificWithAlias src specific alias l = do
     let actualType = ActualType.ThirdPartyImport (ActualType.ThirdPartyImportContent (src ++ "." ++ specific))
     let symbolTable' = SymbolTable.insertVar aliasVarName aliasVar actualType (symbolTable ctx)
     put $ ctx { symbolTable = symbolTable' }
-    return $ Cfg.empty l
+    return Cfg.Empty
 
 codeGenStmtImportAllWithAlias :: String -> String -> Location -> CodeGenContext Cfg
 codeGenStmtImportAllWithAlias src alias l = do
@@ -367,7 +364,7 @@ codeGenStmtImportAllWithAlias src alias l = do
     let actualType = ActualType.ThirdPartyImport (ActualType.ThirdPartyImportContent src)
     let symbolTable' = SymbolTable.insertVar aliasVarName aliasVar actualType (symbolTable ctx)
     put $ ctx { symbolTable = symbolTable' }
-    return $ Cfg.empty l
+    return Cfg.Empty
 
 codeGenStmtImport :: Ast.StmtImportContent -> CodeGenContext Cfg
 codeGenStmtImport stmtImport = do
@@ -429,49 +426,54 @@ codeGenExpAssignToSimpleVar varName init = do
     let actualVar = case existingVar of { Nothing -> newVariable; Just (v, _) -> v }
     put $ case existingVar of { Nothing -> updateSymbolTable; _ -> dontChangeCtx }
     let cfg = initCfg `Cfg.concat` (createAssignCfg location' actualVar initVariable)
-    return $ GeneratedExp cfg actualVar actualType
+    return $ GeneratedExp cfg (Bitcode.VariableCtor actualVar) actualType
+
+codeGenExpAssignToFieldVar'' :: Bitcode.Variable -> Cfg -> GeneratedExp -> Token.FieldName -> Location -> CodeGenContext GeneratedExp
+codeGenExpAssignToFieldVar'' varLhs varCfg init fieldName loc = do
+    let initValue = generatedValue init
+    let content' = Bitcode.FieldWriteContent varLhs fieldName initValue
+    let fieldWrite = Bitcode.FieldWrite content'
+    let instruction = Bitcode.Instruction loc fieldWrite
+    let initCfg = generatedCfg init
+    let instructionCfg = Cfg.Normal (Cfg.atom (Cfg.Node instruction))
+    let cfg = initCfg `Cfg.concat` varCfg `Cfg.concat` instructionCfg
+    let actualType = inferredActualType init
+    return $ GeneratedExp cfg (Bitcode.VariableCtor varLhs) actualType
+
+codeGenExpAssignToFieldVar' :: GeneratedExp -> GeneratedExp -> Token.FieldName -> Location -> CodeGenContext GeneratedExp
+codeGenExpAssignToFieldVar' (GeneratedExp c (Bitcode.VariableCtor v) _) init fieldName loc = codeGenExpAssignToFieldVar'' v c init fieldName loc
+codeGenExpAssignToFieldVar' _ init _ _ = return init
 
 codeGenExpAssignToFieldVar :: Ast.VarFieldContent -> Ast.Exp -> CodeGenContext GeneratedExp
-codeGenExpAssignToFieldVar var exp = do
-    exp' <- codeGenExp exp
-    var' <- codeGenExp (Ast.varFieldLhs var)
-    let location' = Ast.varFieldLocation var
-    let lhsVar = generatedValue var'
-    let expVar = generatedValue exp'
-    let fieldName = Ast.varFieldName var
-    let content' = Bitcode.FieldWriteContent lhsVar fieldName expVar
-    let fieldWrite = Bitcode.FieldWrite content'
-    let instruction = Bitcode.Instruction location' fieldWrite
-    let expCfg = generatedCfg exp'
-    let varCfg = generatedCfg var'
-    let cfg = Cfg.atom (Cfg.Node instruction)
-    let finalCfg = expCfg `Cfg.concat` varCfg `Cfg.concat` cfg
-    let actualType = inferredActualType var'
-    return $ GeneratedExp finalCfg lhsVar actualType
+codeGenExpAssignToFieldVar v init = do
+    init' <- codeGenExp init
+    v' <- codeGenExp (Ast.varFieldLhs v)
+    codeGenExpAssignToFieldVar' v' init' (Ast.varFieldName v) (Ast.varFieldLocation v)
+
+codeGenExpAssignToSubscriptVar'' :: Bitcode.Variable -> Cfg -> GeneratedExp -> GeneratedExp -> Location -> CodeGenContext GeneratedExp
+codeGenExpAssignToSubscriptVar'' v vCfg index init loc = do
+    let initValue = generatedValue init
+    let indexValue = generatedValue index
+    let initCfg = generatedCfg init
+    let indexCfg = generatedCfg index
+    let actualType = inferredActualType init
+    let content' = Bitcode.SubscriptWriteContent v indexValue initValue
+    let subscriptWrite = Bitcode.SubscriptWrite content'
+    let instruction = Bitcode.Instruction loc subscriptWrite
+    let cfg = initCfg `Cfg.concat` indexCfg `Cfg.concat` vCfg
+    let finalCfg = cfg `Cfg.concat` Cfg.Normal (Cfg.atom (Cfg.Node instruction))
+    return $ GeneratedExp finalCfg (Bitcode.VariableCtor v) actualType
+
+codeGenExpAssignToSubscriptVar' :: GeneratedExp -> GeneratedExp -> GeneratedExp -> Location -> CodeGenContext GeneratedExp
+codeGenExpAssignToSubscriptVar' (GeneratedExp c (Bitcode.VariableCtor v) _) index init loc = codeGenExpAssignToSubscriptVar'' v c index init loc
+codeGenExpAssignToSubscriptVar' _ _ init _ = return init
 
 codeGenExpAssignToSubscriptVar :: Ast.VarSubscriptContent -> Ast.Exp -> CodeGenContext GeneratedExp
-codeGenExpAssignToSubscriptVar subscriptVar value = do
-    value' <- codeGenExp value
-    index <- codeGenExp (Ast.varSubscriptIdx subscriptVar)
-    lhs <- codeGenExp (Ast.varSubscriptLhs subscriptVar)
-    let valueCfg = generatedCfg value'
-    let indexCfg = generatedCfg index
-    let lhsVar = generatedValue lhs
-    let lhsCfg = generatedCfg lhs
-    let lhsType = inferredActualType lhs
-    let fqn = ActualType.toFqn lhsType
-    let location' = Ast.varSubscriptLocation subscriptVar
-    let varName = Token.VarName $ Token.Named (Fqn.content fqn) location'
-    let output = Bitcode.SrcVariableCtor $ Bitcode.SrcVariable fqn varName
-    let subscriptIdx = generatedValue index
-    let input = generatedValue value'
-    let actualType = inferredActualType value'
-    let content' = Bitcode.SubscriptWriteContent output subscriptIdx input
-    let subscriptWrite = Bitcode.SubscriptWrite content'
-    let instruction = Bitcode.Instruction location' subscriptWrite
-    let cfg = valueCfg `Cfg.concat` indexCfg `Cfg.concat` lhsCfg
-    let finalCfg = cfg `Cfg.concat` (Cfg.atom (Cfg.Node instruction))
-    return $ GeneratedExp finalCfg lhsVar actualType
+codeGenExpAssignToSubscriptVar v init = do
+    init' <- codeGenExp init
+    index <- codeGenExp (Ast.varSubscriptIdx v)
+    v' <- codeGenExp (Ast.varSubscriptLhs v)
+    codeGenExpAssignToSubscriptVar' v' index init' (Ast.varSubscriptLocation v)
 
 codeGenExpAssign' :: Ast.Var -> Ast.Exp -> CodeGenContext GeneratedExp
 codeGenExpAssign' (Ast.VarSimple    v) e = codeGenExpAssignToSimpleVar (Ast.varName v) e
@@ -488,17 +490,17 @@ codeGenExpBinop :: Ast.ExpBinopContent -> CodeGenContext GeneratedExp
 codeGenExpBinop expBinop = do
     lhs <- codeGenExp (Ast.expBinopLeft expBinop)
     rhs <- codeGenExp (Ast.expBinopRight expBinop)
-    let location' = (Ast.expBinopLocation expBinop)
+    let location' = Ast.expBinopLocation expBinop
     let binopLhs = generatedValue lhs
     let binopRhs = generatedValue rhs
     let binopOutput = Bitcode.TmpVariableCtor $ Bitcode.TmpVariable (Fqn "MMM") location'
     let binop = Bitcode.BinopContent binopOutput binopLhs binopRhs
     let content' = Bitcode.Binop binop
     let instruction = Bitcode.Instruction location' content'
-    let cfg = Cfg.atom (Cfg.Node instruction)
+    let cfg = Cfg.Normal (Cfg.atom (Cfg.Node instruction))
     let actualType = someType
-    let binopCfg = (generatedCfg lhs) `Cfg.concat` (generatedCfg rhs)
-    return $ GeneratedExp (binopCfg `Cfg.concat` cfg) binopOutput actualType
+    let binopCfg = generatedCfg lhs `Cfg.concat` generatedCfg rhs
+    return $ GeneratedExp (binopCfg `Cfg.concat` cfg) (Bitcode.VariableCtor binopOutput) actualType
 
 -- |
 -- two things happen during codegen of lambdas:
@@ -519,7 +521,7 @@ endScope   = do { ctx <- get; put $ ctx { symbolTable = SymbolTable.endScope   (
 handleLambda :: Ast.ExpLambdaContent -> CodeGenContext Callable
 handleLambda lambda = do
     paramDeclsCfg <- codeGenLambdaParams lambda
-    lambdaBodyCfg <- codeGenStmts (Ast.expLambdaLocation lambda) (Ast.expLambdaBody lambda)
+    lambdaBodyCfg <- codeGenStmts (Ast.expLambdaBody lambda)
     return $ lambdaToCallable (Cfg.concat paramDeclsCfg lambdaBodyCfg) (Ast.expLambdaLocation lambda)
 
 handleLambdaCallable :: Ast.ExpLambdaContent -> CodeGenContext Callable
@@ -530,12 +532,12 @@ insertLambdaCallable :: Ast.ExpLambdaContent -> CodeGenContext ()
 insertLambdaCallable expLambda = do { c <- handleLambdaCallable expLambda; ctx <- get; put $ ctx { callables = c:(callables ctx) } }
 
 codeGenLambdaParams :: Ast.ExpLambdaContent -> CodeGenContext Cfg
-codeGenLambdaParams lambda = codeGenParams (Ast.expLambdaLocation lambda) (Ast.expLambdaParams lambda)
+codeGenLambdaParams = codeGenParams . Ast.expLambdaParams
 
-codeGenParams :: Location -> [ Ast.Param ] -> CodeGenContext Cfg
-codeGenParams loc params' = do
+codeGenParams :: [ Ast.Param ] -> CodeGenContext Cfg
+codeGenParams params' = do
     cfgs <- codeGenParams' 0 params'
-    return $ foldl' Cfg.concat (Cfg.empty loc) cfgs
+    return $ foldl' Cfg.concat Cfg.Empty cfgs
 
 codeGenParams' :: Word -> [ Ast.Param ] -> CodeGenContext [ Cfg ]
 codeGenParams' _ [] = return []
@@ -554,14 +556,14 @@ codeGenParam' i name nominalType = do
     let paramDecl = Bitcode.ParamDecl $ Bitcode.ParamDeclContent paramVar
     let instruction = Bitcode.Instruction location' paramDecl
     put (ctx { symbolTable = SymbolTable.insertParam name v actualType (symbolTable ctx) })
-    return (Cfg.atom (Cfg.Node instruction))
+    return (Cfg.Normal (Cfg.atom (Cfg.Node instruction)))
 
 mkParamDeclCfg :: Word -> Ast.Param -> Fqn -> Token.ParamName -> Cfg
 mkParamDeclCfg i p fqn name = let
     paramVar = Bitcode.ParamVariable fqn i (Ast.paramName p)
     paramDecl = Bitcode.ParamDecl (Bitcode.ParamDeclContent paramVar)
     instruction = Bitcode.Instruction (Token.getParamNameLocation name) paramDecl
-    in (Cfg.atom (Cfg.Node instruction))
+    in Cfg.Normal (Cfg.atom (Cfg.Node instruction))
 
 existingHostingClassOrAny :: SymbolTable -> ActualType
 existingHostingClassOrAny = SymbolTable.lookupSelfOrAny
@@ -603,11 +605,11 @@ codeGenParam paramSerialIdx' param = case Ast.paramNominalType param of
 --
 codeGenExpLambda' :: Ast.ExpLambdaContent -> CodeGenContext GeneratedExp
 codeGenExpLambda' expLambda = do
-    let location' = (Ast.expLambdaLocation expLambda)
+    let location' = Ast.expLambdaLocation expLambda
     let tmpVariable = Bitcode.TmpVariable (Fqn "lambda") location'
     let variable = Bitcode.TmpVariableCtor tmpVariable
     let actualType = ActualType.Lambda $ ActualType.LambdaContent location'
-    return $ GeneratedExp (Cfg.empty location') variable actualType
+    return $ GeneratedExp Cfg.Empty (Bitcode.VariableCtor variable) actualType
 
 -- | whenever something goes wrong, or simply not supported
 -- we can generate a non deterministic expression
@@ -619,8 +621,9 @@ nondet varName = let
     output = Bitcode.SrcVariableCtor $ Bitcode.SrcVariable (Fqn rawName) varName
     unresolvedRef = Bitcode.UnresolvedRef (Bitcode.UnresolvedRefContent output unresolvedRefInput location')
     instruction = Bitcode.Instruction location' unresolvedRef
-    cfg = Cfg.atom (Cfg.Node instruction)
-    in GeneratedExp cfg output (ActualType.ThirdPartyImport (ActualType.ThirdPartyImportContent "KOKO77777"))
+    cfg = Cfg.Normal (Cfg.atom (Cfg.Node instruction))
+    actualType = ActualType.ThirdPartyImport (ActualType.ThirdPartyImportContent "KOKO77777")
+    in GeneratedExp cfg (Bitcode.VariableCtor output) actualType
 
 someType :: ActualType
 someType = ActualType.ThirdPartyImport (ActualType.ThirdPartyImportContent "KOKO77777")
@@ -639,50 +642,57 @@ codeGenExpVarSimpleMissing v = let
     actualType = ActualType.ThirdPartyImport content'
     in generatedExp { inferredActualType = actualType }
 
-codeGenExpVarSimpleExisting :: Token.VarName -> Bitcode.Variable -> ActualType -> GeneratedExp
-codeGenExpVarSimpleExisting v = GeneratedExp (Cfg.empty (Token.getVarNameLocation v))
+codeGenVarSimple' :: Token.VarName -> SymbolTable -> GeneratedExp
+codeGenVarSimple' v table = case SymbolTable.lookupVar v table of
+    Nothing -> codeGenExpVarSimpleMissing v
+    Just (v', actualType) -> GeneratedExp Cfg.Empty (Bitcode.VariableCtor v') actualType
 
 codeGenVarSimple :: Ast.VarSimpleContent -> CodeGenState -> GeneratedExp
-codeGenVarSimple v ctx = case SymbolTable.lookupVar (Ast.varName v) (symbolTable ctx) of
-    Nothing -> codeGenExpVarSimpleMissing (Ast.varName v)
-    Just (bitcodeVar, actualType) -> codeGenExpVarSimpleExisting (Ast.varName v) bitcodeVar actualType
+codeGenVarSimple v ctx = codeGenVarSimple' (Ast.varName v) (symbolTable ctx)
+
+codeGenVarField'' :: Bitcode.Variable -> Cfg -> ActualType -> Token.FieldName -> Location -> CodeGenContext GeneratedExp
+codeGenVarField'' v cfgLhs actualType fieldName loc = do
+    let actualType' = ActualType.getFieldedAccess actualType fieldName
+    let outputFqn = ActualType.toFqn actualType'
+    let output = Bitcode.TmpVariableCtor (Bitcode.TmpVariable outputFqn loc)
+    let fieldReadContent = Bitcode.FieldReadContent output v fieldName
+    let fieldRead = Bitcode.FieldRead fieldReadContent
+    let fieldReadInstruction = Bitcode.Instruction loc fieldRead
+    let cfgFieldRead = Cfg.Normal (Cfg.atom (Cfg.Node fieldReadInstruction))
+    let cfg = cfgLhs `Cfg.concat` cfgFieldRead
+    return $ GeneratedExp cfg (Bitcode.VariableCtor output) actualType'
+
+codeGenVarField' :: Bitcode.Value -> Cfg -> ActualType -> Token.FieldName -> Location -> CodeGenContext GeneratedExp
+codeGenVarField' (Bitcode.VariableCtor v) cfg actualType fieldName loc = codeGenVarField'' v cfg actualType fieldName loc
+codeGenVarField' v cfg actualType _ _ = return (GeneratedExp cfg v actualType)
 
 codeGenVarField :: Ast.VarFieldContent -> CodeGenContext GeneratedExp
 codeGenVarField v = do
     v' <- codeGenExp (Ast.varFieldLhs v)
-    let fieldName = Ast.varFieldName v
-    let cfgLhsExpVar = generatedCfg v'
-    let input = generatedValue v'
-    let actualType = inferredActualType v'
-    let actualType' = ActualType.getFieldedAccess actualType fieldName
-    let outputFqn = ActualType.toFqn actualType'
-    let location' = Ast.varFieldLocation v
-    let output = Bitcode.TmpVariableCtor (Bitcode.TmpVariable outputFqn location')
-    let fieldReadContent = Bitcode.FieldReadContent output input fieldName
-    let fieldRead = Bitcode.FieldRead fieldReadContent
-    let fieldReadInstruction = Bitcode.Instruction location' fieldRead
-    let cfgFieldRead = Cfg.atom (Cfg.Node fieldReadInstruction)
-    let cfg = cfgLhsExpVar `Cfg.concat` cfgFieldRead
-    return $ GeneratedExp cfg output actualType'
+    codeGenVarField' (generatedValue v') (generatedCfg v') (inferredActualType v') (Ast.varFieldName v) (Ast.varFieldLocation v)
+
+codeGenVarSubscript'' :: Bitcode.Variable -> Cfg -> ActualType -> Ast.Exp -> Location -> CodeGenContext GeneratedExp
+codeGenVarSubscript'' v cfgLhs actualType idx loc = do
+    idx' <- codeGenExp idx
+    let idxCfg = generatedCfg idx'
+    let idxValue = generatedValue idx'
+    let outputFqn = ActualType.toFqn actualType
+    let output = Bitcode.TmpVariableCtor (Bitcode.TmpVariable outputFqn loc)
+    let subscriptReadContent = Bitcode.SubscriptReadContent output v idxValue
+    let subscriptRead = Bitcode.SubscriptRead subscriptReadContent
+    let subscriptReadInstruction = Bitcode.Instruction loc subscriptRead
+    let cfgSubscriptRead = Cfg.Normal (Cfg.atom (Cfg.Node subscriptReadInstruction))
+    let cfg = idxCfg `Cfg.concat` cfgLhs `Cfg.concat` cfgSubscriptRead
+    return $ GeneratedExp cfg (Bitcode.VariableCtor output) actualType
+
+codeGenVarSubscript' :: Bitcode.Value -> Cfg -> ActualType -> Ast.Exp -> Location -> CodeGenContext GeneratedExp
+codeGenVarSubscript' (Bitcode.VariableCtor v) cfg actualType idx loc = codeGenVarSubscript'' v cfg actualType idx loc
+codeGenVarSubscript' v cfg actualType _ _ = return (GeneratedExp cfg v actualType)
 
 codeGenVarSubscript :: Ast.VarSubscriptContent -> CodeGenContext GeneratedExp
 codeGenVarSubscript v = do
     v' <- codeGenExp (Ast.varSubscriptLhs v)
-    i' <- codeGenExp (Ast.varSubscriptIdx v)
-    let cfgLhs = generatedCfg v'
-    let cfgIdx = generatedCfg i'
-    let input = generatedValue v'
-    let index = generatedValue i'
-    let actualType = inferredActualType v'
-    let outputFqn = ActualType.toFqn actualType
-    let location' = Ast.varSubscriptLocation v
-    let output = Bitcode.TmpVariableCtor (Bitcode.TmpVariable outputFqn location')
-    let subscriptReadContent = Bitcode.SubscriptReadContent output input index
-    let subscriptRead = Bitcode.SubscriptRead subscriptReadContent
-    let subscriptReadInstruction = Bitcode.Instruction location' subscriptRead
-    let cfgSubscriptRead = Cfg.atom (Cfg.Node subscriptReadInstruction)
-    let cfg = cfgIdx `Cfg.concat` cfgLhs `Cfg.concat` cfgSubscriptRead
-    return $ GeneratedExp cfg output actualType
+    codeGenVarSubscript' (generatedValue v') (generatedCfg v') (inferredActualType v') (Ast.varSubscriptLhs v) (Ast.varSubscriptLocation v)
 
 codeGenVar :: Ast.Var -> CodeGenContext GeneratedExp
 codeGenVar (Ast.VarSimple    v) = codeGenVarSimple v <$> get
@@ -710,28 +720,53 @@ getReturnActualType'' _ = ActualType.ThirdPartyImport (ThirdPartyImportContent "
 getReturnActualType :: Callee -> Args -> ActualType
 getReturnActualType callee _ = getReturnActualType'' callee
 
-buildTheActualCall' :: Callee -> Args -> Bitcode.Variable -> Location -> Bitcode.CallContent
-buildTheActualCall' callee args output location' = let
-    callee' = generatedValue callee
+--buildTheActualCall' :: Callee -> Args -> Bitcode.Variable -> Location -> Bitcode.CallContent
+--buildTheActualCall' callee args output location' = let
+--    callee' = generatedValue callee
+--    args' = Data.List.map generatedValue args
+--    in Bitcode.CallContent output callee' args' location'
+
+--buildTheActualCall :: Callee -> Args -> Bitcode.Variable -> Location -> Cfg
+--buildTheActualCall c a v l = Cfg.Normal $ Cfg.atom $ Cfg.Node $ Bitcode.Instruction l $ Bitcode.Call $ buildTheActualCall' c a v l
+
+--codeGenExpCall' :: Callee -> Args -> Location -> GeneratedExp
+--codeGenExpCall' callee args location' = let
+--    returnType = getReturnActualType callee args
+--    output = Bitcode.TmpVariableCtor $ Bitcode.TmpVariable (ActualType.toFqn returnType) location'
+--    actualCall = buildTheActualCall callee args output location'
+--    prepareCall = foldl' Cfg.concat (generatedCfg callee) (Data.List.map generatedCfg args)
+--    in GeneratedExp (prepareCall `Cfg.concat` actualCall) output returnType
+
+codeGenExpCall'' :: Bitcode.Variable -> Cfg -> ActualType -> [ GeneratedExp ] -> Location -> GeneratedExp
+codeGenExpCall'' v cfg actualType args loc = let
+    returnType = getReturnActualType' actualType
+    output = Bitcode.TmpVariableCtor (Bitcode.TmpVariable (ActualType.toFqn returnType) loc)
     args' = Data.List.map generatedValue args
-    in Bitcode.CallContent output callee' args' location'
+    callInstruction = Bitcode.Instruction loc (Bitcode.Call (Bitcode.CallContent output v args' loc))
+    actualCall = Cfg.Normal (Cfg.atom (Cfg.Node callInstruction))
+    prepareCall = foldl' Cfg.concat cfg (Data.List.map generatedCfg args)
+    in GeneratedExp (prepareCall `Cfg.concat` actualCall) (Bitcode.VariableCtor output) returnType
 
-buildTheActualCall :: Callee -> Args -> Bitcode.Variable -> Location -> Cfg
-buildTheActualCall c a v l = Cfg.atom $ Cfg.Node $ (Bitcode.Instruction l) $ Bitcode.Call $ buildTheActualCall' c a v l
-
-codeGenExpCall' :: Callee -> Args -> Location -> GeneratedExp
-codeGenExpCall' callee args location' = let
-    returnType = getReturnActualType callee args
-    output = Bitcode.TmpVariableCtor $ Bitcode.TmpVariable (ActualType.toFqn returnType) location'
-    actualCall = buildTheActualCall callee args output location'
-    prepareCall = foldl' Cfg.concat (generatedCfg callee) (Data.List.map generatedCfg args)
-    in GeneratedExp (prepareCall `Cfg.concat` actualCall) output returnType
+codeGenExpCall' :: Bitcode.Value -> Cfg -> ActualType -> [ GeneratedExp ] -> Location -> GeneratedExp
+codeGenExpCall' (Bitcode.VariableCtor v) cfg actualType args loc = codeGenExpCall'' v cfg actualType args loc
+codeGenExpCall' _ _ _ _ loc = nullGeneratedExp loc
 
 codeGenExpCall :: Ast.ExpCallContent -> CodeGenContext GeneratedExp
 codeGenExpCall call = do
     callee <- codeGenExp (Ast.callee call)
     args <- codeGenExps (Ast.args call)
-    return $ codeGenExpCall' callee args (Ast.expCallLocation call)
+    return $ codeGenExpCall' (generatedValue callee) (generatedCfg callee) (inferredActualType callee) args (Ast.expCallLocation call)
+
+nullBitcodeValue :: Location -> Bitcode.Value
+nullBitcodeValue = Bitcode.ConstValueCtor . Bitcode.ConstNullValue . Token.ConstNull
+
+nullGeneratedExp :: Location -> GeneratedExp
+nullGeneratedExp loc = GeneratedExp Cfg.Empty (nullBitcodeValue loc) ActualType.Any
+
+getReturnActualType' :: ActualType -> ActualType
+getReturnActualType' (ActualType.Function f) = ActualType.returnType f
+getReturnActualType' (ActualType.ThirdPartyImport i) = ActualType.ThirdPartyImport i
+getReturnActualType' _ = ActualType.ThirdPartyImport (ThirdPartyImportContent "MOMO66")
 
 -- | during stmt assign, it could be the case that
 -- a simple variable is also defined. if so, we need
@@ -774,40 +809,13 @@ codeGenStmtAssignToSimpleVar varName init = do
 
 codeGenStmtAssignToFieldVar :: Ast.VarFieldContent -> Ast.Exp -> CodeGenContext Cfg
 codeGenStmtAssignToFieldVar var exp = do
-    exp' <- codeGenExp exp
-    var' <- codeGenExp (Ast.varFieldLhs var)
-    let location' = Ast.varFieldLocation var
-    let lhsVar = generatedValue var'
-    let expVar = generatedValue exp'
-    let fieldName = Ast.varFieldName var
-    let content' = Bitcode.FieldWriteContent lhsVar fieldName expVar
-    let fieldWrite = Bitcode.FieldWrite content'
-    let instruction = Bitcode.Instruction location' fieldWrite
-    let expCfg = generatedCfg exp'
-    let varCfg = generatedCfg var'
-    let cfg = Cfg.atom (Cfg.Node instruction)
-    return $ expCfg `Cfg.concat` varCfg `Cfg.concat` cfg
+    generatedExp <- codeGenExpAssignToFieldVar var exp
+    return (generatedCfg generatedExp)
 
 codeGenStmtAssignToSubscriptVar :: Ast.VarSubscriptContent -> Ast.Exp -> CodeGenContext Cfg
-codeGenStmtAssignToSubscriptVar subscriptVar value = do
-    value' <- codeGenExp value
-    index <- codeGenExp (Ast.varSubscriptIdx subscriptVar)
-    lhs <- codeGenExp (Ast.varSubscriptLhs subscriptVar)
-    let valueCfg = generatedCfg value'
-    let indexCfg = generatedCfg index
-    let lhsCfg = generatedCfg lhs
-    let lhsType = inferredActualType lhs
-    let fqn = ActualType.toFqn lhsType
-    let location' = Ast.varSubscriptLocation subscriptVar
-    let varName = Token.VarName $ Token.Named (Fqn.content fqn) location'
-    let output = Bitcode.SrcVariableCtor $ Bitcode.SrcVariable fqn varName
-    let subscriptIdx = generatedValue index
-    let input = generatedValue value'
-    let content' = Bitcode.SubscriptWriteContent output subscriptIdx input
-    let subscriptWrite = Bitcode.SubscriptWrite content'
-    let instruction = Bitcode.Instruction location' subscriptWrite
-    let cfg = valueCfg `Cfg.concat` indexCfg `Cfg.concat` lhsCfg
-    return $ cfg `Cfg.concat` (Cfg.atom (Cfg.Node instruction))
+codeGenStmtAssignToSubscriptVar var exp = do
+    generatedExp <- codeGenExpAssignToSubscriptVar var exp
+    return (generatedCfg generatedExp)
 
 codeGenStmtAssign' :: Ast.Var -> Ast.Exp -> CodeGenContext Cfg
 codeGenStmtAssign' (Ast.VarSimple    v) e = codeGenStmtAssignToSimpleVar (Ast.varName v) e
@@ -842,21 +850,21 @@ insertVarWithActualTypeToSymbolTable name actualType = do
 insertVarNoNominalTypeToSymbolTable :: Token.VarName -> CodeGenContext ()
 insertVarNoNominalTypeToSymbolTable name = void (insertVarWithActualTypeToSymbolTable name ActualType.Any)
 
-codeGenStmtVardecNoInitNoNominalType :: Token.VarName -> Location -> CodeGenContext Cfg
-codeGenStmtVardecNoInitNoNominalType v l = do { insertVarNoNominalTypeToSymbolTable v; return (Cfg.empty l) }
+codeGenStmtVardecNoInitNoNominalType :: Token.VarName -> CodeGenContext Cfg
+codeGenStmtVardecNoInitNoNominalType v = do { insertVarNoNominalTypeToSymbolTable v; return Cfg.Empty }
 
 insertVarToSymbolTable :: Token.VarName -> Ast.Var -> CodeGenContext ()
 insertVarToSymbolTable name t = void (insertVarWithActualTypeToSymbolTable name . inferredActualType =<< codeGenVar t)
 
-codeGenStmtVardecNoInit' :: Location -> Token.VarName -> Ast.Var -> CodeGenContext Cfg
-codeGenStmtVardecNoInit' l v t = do { insertVarToSymbolTable v t; return (Cfg.empty l) }
+codeGenStmtVardecNoInit' :: Token.VarName -> Ast.Var -> CodeGenContext Cfg
+codeGenStmtVardecNoInit' v t = do { insertVarToSymbolTable v t; return Cfg.Empty }
 
-codeGenStmtVardecNoInit :: Ast.StmtVardecContent -> Location -> CodeGenContext Cfg
-codeGenStmtVardecNoInit v loc = case Ast.stmtVardecNominalType v of
-    Nothing -> codeGenStmtVardecNoInitNoNominalType (Ast.stmtVardecName v) loc
-    Just nominalType -> codeGenStmtVardecNoInit' loc (Ast.stmtVardecName v) nominalType
+codeGenStmtVardecNoInit :: Ast.StmtVardecContent -> CodeGenContext Cfg
+codeGenStmtVardecNoInit v = case Ast.stmtVardecNominalType v of
+    Nothing -> codeGenStmtVardecNoInitNoNominalType (Ast.stmtVardecName v)
+    Just nominalType -> codeGenStmtVardecNoInit' (Ast.stmtVardecName v) nominalType
 
-codeGenStmtVardecInit'' :: Token.VarName -> Cfg -> Bitcode.Variable -> ActualType -> CodeGenContext Cfg
+codeGenStmtVardecInit'' :: Token.VarName -> Cfg -> Bitcode.Value -> ActualType -> CodeGenContext Cfg
 codeGenStmtVardecInit'' name cfg init actualType = do
     v <- insertVarWithActualTypeToSymbolTable name actualType
     return $ cfg `Cfg.concat` createAssignCfg (Token.getVarNameLocation name) v init
@@ -869,71 +877,45 @@ codeGenStmtVardecInit name init = codeGenStmtVardecInit' name =<< codeGenExp ini
 
 codeGenStmtVardec :: Ast.StmtVardecContent -> CodeGenContext Cfg
 codeGenStmtVardec d = case Ast.stmtVardecInitValue d of
-    Nothing -> codeGenStmtVardecNoInit d (Ast.stmtVardecLocation d)
+    Nothing -> codeGenStmtVardecNoInit d
     Just init -> codeGenStmtVardecInit (Ast.stmtVardecName d) init
 
 -- | used by codeGenStmtVardecInit''
-createAssignCfg :: Location -> Bitcode.Variable -> Bitcode.Variable -> Cfg
+createAssignCfg :: Location -> Bitcode.Variable -> Bitcode.Value -> Cfg
 createAssignCfg loc srcVariable initValue = let
     assignContent = Bitcode.AssignContent srcVariable initValue
     assign = Bitcode.Assign assignContent
     instruction = Bitcode.Instruction loc assign
-    in Cfg.atom (Cfg.Node instruction)
+    in Cfg.Normal (Cfg.atom (Cfg.Node instruction))
 
 codeGenExpInt :: Ast.ExpIntContent -> GeneratedExp
-codeGenExpInt expInt = let
-    constInt = Ast.expIntValue expInt
-    constIntValue = Token.constIntValue constInt
-    location' = Token.constIntLocation constInt
-    tmpVariable = Bitcode.TmpVariable Fqn.nativeInt location'
-    variable = Bitcode.TmpVariableCtor tmpVariable
-    loadImmInt = Bitcode.IntContent tmpVariable constInt
-    instruction = Bitcode.Instruction location' $ Bitcode.LoadImmInt loadImmInt
-    actualType = ActualType.NativeTypeConstInt constIntValue
-    in GeneratedExp (Cfg.atom (Node instruction)) variable actualType
+codeGenExpInt (Ast.ExpIntContent constInt) = let
+    constValue = Bitcode.ConstValueCtor (Bitcode.ConstIntValue constInt)
+    actualType = ActualType.NativeTypeConstInt (Token.constIntValue constInt)
+    in GeneratedExp Cfg.Empty constValue actualType
 
 codeGenExpStr :: Ast.ExpStrContent -> GeneratedExp
-codeGenExpStr expStr = let
-    constStr = Ast.expStrValue expStr
-    constStrValue = Token.constStrValue constStr
-    location' = Token.constStrLocation constStr
-    tmpVariable = Bitcode.TmpVariable Fqn.nativeStr location'
-    variable = Bitcode.TmpVariableCtor tmpVariable
-    loadImmStr = Bitcode.StrContent tmpVariable constStr
-    instruction = Bitcode.Instruction location' $ Bitcode.LoadImmStr loadImmStr
-    actualType = ActualType.NativeTypeConstStr constStrValue
-    in GeneratedExp (Cfg.atom (Node instruction)) variable actualType
+codeGenExpStr (Ast.ExpStrContent constStr) = let
+    constValue = Bitcode.ConstValueCtor (Bitcode.ConstStrValue constStr)
+    actualType = ActualType.NativeTypeConstStr (Token.constStrValue constStr)
+    in GeneratedExp Cfg.Empty constValue actualType
 
 codeGenExpBool :: Ast.ExpBoolContent -> GeneratedExp
-codeGenExpBool expBool = let
-    constBool = Ast.expBoolValue expBool
-    constBoolValue = Token.constBoolValue constBool
-    location' = Token.constBoolLocation constBool
-    tmpVariable = Bitcode.TmpVariable Fqn.nativeBool location'
-    variable = Bitcode.TmpVariableCtor tmpVariable
-    loadImmBool = Bitcode.BoolContent tmpVariable constBool
-    instruction = Bitcode.Instruction location' (Bitcode.LoadImmBool loadImmBool)
-    actualType = ActualType.NativeTypeConstBool constBoolValue
-    in GeneratedExp (Cfg.atom (Node instruction)) variable actualType
+codeGenExpBool (Ast.ExpBoolContent constBool) = let
+    constValue = Bitcode.ConstValueCtor (Bitcode.ConstBoolValue constBool)
+    actualType = ActualType.NativeTypeConstBool (Token.constBoolValue constBool)
+    in GeneratedExp Cfg.Empty constValue actualType
 
 codeGenExpNull :: Ast.ExpNullContent -> GeneratedExp
-codeGenExpNull expNull = let
-    constNull = Ast.expNullValue expNull
-    location' = Token.constNullLocation constNull
-    tmpVariable = Bitcode.TmpVariable Fqn.nativeNull location'
-    variable = Bitcode.TmpVariableCtor tmpVariable
-    loadImmNull = Bitcode.NullContent tmpVariable constNull
-    instruction = Bitcode.Instruction location' (Bitcode.LoadImmNull loadImmNull)
+codeGenExpNull (Ast.ExpNullContent constNull) = let
+    constValue = Bitcode.ConstValueCtor (Bitcode.ConstNullValue constNull)
     actualType = ActualType.NativeTypeConstNull
-    in GeneratedExp (Cfg.atom (Node instruction)) variable actualType
+    in GeneratedExp Cfg.Empty constValue actualType
 
 -- minor non interesting helper functions here
 
-scriptToCallable :: Cfg -> Callable
-scriptToCallable cfg = let
-    filename' = Location.filename (Cfg.location cfg)
-    content' = Callable.ScriptContent filename' cfg
-    in Callable.Script content'
+scriptToCallable :: FilePath -> Cfg -> Callable
+scriptToCallable = (Callable.Script .) . Callable.ScriptContent
 
 decFuncToCallable :: Ast.StmtFuncContent -> Cfg -> [ Callable.Annotation ] -> Callable
 decFuncToCallable stmtFunc cfg annotations = let
