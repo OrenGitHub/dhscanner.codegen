@@ -922,15 +922,15 @@ decFuncToCallable stmtFunc cfg annotations = let
     content' = Callable.FunctionContent (Ast.stmtFuncName stmtFunc) cfg annotations (Ast.stmtFuncLocation stmtFunc)
     in Callable.Function content'
 
-fqnify :: SymbolTable -> [ Token.SuperName ] -> [ Fqn ]
+fqnify :: SymbolTable -> [ Token.SuperName ] -> [ Callable.HostingClassSuper ]
 fqnify = Data.List.map . fqnify'
 
-fqnify' :: SymbolTable -> Token.SuperName -> Fqn
+fqnify' :: SymbolTable -> Token.SuperName -> Callable.HostingClassSuper
 fqnify' symbolTable' superName = let
     actualType = SymbolTable.lookupSuperType superName symbolTable'
     in case actualType of
-        Nothing -> Fqn (Token.content (Token.getSuperNameToken superName))
-        Just actualType' -> toFqn actualType'
+        Nothing -> Callable.HostingClassSuper superName Nothing
+        Just actualType' -> Callable.HostingClassSuper superName (Just (toFqn actualType'))
 
 stmtMethodToCallable :: Ast.StmtMethodContent -> SymbolTable -> Cfg -> Callable
 stmtMethodToCallable stmtMethod symbolTable' cfg = let
