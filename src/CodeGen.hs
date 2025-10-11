@@ -945,8 +945,3 @@ lambdaToCallable :: Cfg -> Location -> Callable
 lambdaToCallable cfg location' = let
     content' = Callable.LambdaContent cfg location'
     in Callable.Lambda content'
-
--- | Temporarily
-defaultLoc :: Location
-defaultLoc = Location "" 0 0 0 0
-
