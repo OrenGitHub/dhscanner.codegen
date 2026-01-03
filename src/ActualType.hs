@@ -33,12 +33,13 @@ data ActualType
    | Method MethodContent
    | Package PackageContent
    | Function FunctionContent
+   | FirstPartyImport FirstPartyImportContent
    | ThirdPartyImport ThirdPartyImportContent
    deriving ( Show, Eq, Ord, Generic )
 
-data Classes = Classes { actualClasses :: Map String ClassContent } deriving ( Show )
+newtype Classes = Classes { actualClasses :: Map String ClassContent } deriving ( Show )
 
-data Functions
+newtype Functions
    = Functions
      {
          actualFunctions :: Map String ClassContent
@@ -50,14 +51,14 @@ data Functions
 --    where
 --        actualClasses' = alter c classes 
 
-data Super
+newtype Super
    = Super
      {
          actualSuper :: ClassContent
      }
      deriving ( Show, Eq, Ord, Generic )
 
-data Supers
+newtype Supers
    = Supers
      {
          actualSupers :: Set Super
@@ -72,7 +73,7 @@ data DataMember
      }
      deriving ( Show, Eq, Ord, Generic )
 
-data DataMembers
+newtype DataMembers
    = DataMembers
      {
          actualDataMembers :: Set DataMember
@@ -89,14 +90,14 @@ data ClassContent
      }
      deriving ( Show, Eq, Ord, Generic )
 
-data Methods
+newtype Methods
    = Methods
      {
          actualMethods :: Map String MethodContent
      }
      deriving ( Show, Eq, Ord, Generic )
 
-data Params
+newtype Params
    = Params
      {
          actualParams :: [ Param ]
@@ -129,15 +130,23 @@ data MethodContent
      }
      deriving ( Show, Eq, Ord, Generic )
 
-data LambdaContent
+newtype LambdaContent
    = LambdaContent
      {
          lambdaLocation :: Location
      }
      deriving ( Show, Eq, Ord, Generic )
 
+data FirstPartyImportContent
+   = FirstPartyImportContent
+     {
+         firstPartyImportedContent :: FilePath,
+         firstPartyImportedSpecific :: Maybe String
+     }
+     deriving ( Show, Eq, Ord, Generic )
 
-data ThirdPartyImportContent
+
+newtype ThirdPartyImportContent
    = ThirdPartyImportContent
      {
          thirdPartyImportedName :: String
