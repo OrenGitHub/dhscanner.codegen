@@ -709,7 +709,7 @@ codeGenVarSimple v ctx = codeGenVarSimple' (Ast.varName v) (symbolTable ctx)
 
 codeGenVarField'' :: Bitcode.Variable -> Cfg -> ActualType -> Token.FieldName -> Location -> CodeGenContext GeneratedExp
 codeGenVarField'' v cfgLhs actualType fieldName loc = do
-    let actualType' = ActualType.getFieldedAccess actualType fieldName
+    let actualType' = ActualType.FieldedAccess actualType fieldName
     let outputFqn = ActualType.toFqn actualType'
     let output = Bitcode.TmpVariableCtor (Bitcode.TmpVariable outputFqn loc)
     let fieldReadContent = Bitcode.FieldReadContent output v fieldName

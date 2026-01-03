@@ -35,6 +35,7 @@ data ActualType
    | Function FunctionContent
    | FirstPartyImport FirstPartyImportContent
    | ThirdPartyImport ThirdPartyImportContent
+   | FieldedAccess ActualType Token.FieldName
    deriving ( Show, Eq, Ord, Generic )
 
 newtype Classes = Classes { actualClasses :: Map String ClassContent } deriving ( Show )
@@ -158,13 +159,6 @@ data PackageContent
      {
      }
      deriving ( Show, Eq, Ord, Generic )
-
-getFieldedAccess :: ActualType -> Token.FieldName -> ActualType
-getFieldedAccess t f = let
-    f' = Token.content (Token.getFieldNameToken f)
-    t' = Fqn.content (toFqn t)
-    thirdPartyImportContent = ThirdPartyImportContent (t' ++ "." ++ f')
-    in ThirdPartyImport thirdPartyImportContent
 
 toFqn :: ActualType -> Fqn
 toFqn (ThirdPartyImport (ThirdPartyImportContent name)) = Fqn name
