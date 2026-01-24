@@ -34,7 +34,8 @@ executable codegen
     other-modules:
         CodeGen,
         ActualType,
-        SymbolTable
+        SymbolTable,
+        LoggingConfig
 
     build-depends:
         base,

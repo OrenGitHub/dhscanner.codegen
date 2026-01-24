@@ -11,29 +11,15 @@
 
 import Yesod
 import Prelude
-import Data.Set
 import Data.Aeson()
-import Data.Text
-import Data.Time
-import Data.List
-import Data.Maybe
-import Yesod.Core.Types
-import System.Log.FastLogger
+import qualified Data.Text as T
 import Network.Wai.Handler.Warp
 
--- Wai stuff
-import qualified Network.Wai
-import qualified Network.Wai.Logger
-import qualified Network.HTTP.Types.Status
-import qualified Network.Wai.Middleware.RequestLogger as Wai
-
 -- project imports
-import Cfg
 import Ast
-import Location
-import Callable
-import qualified Bitcode
+import Callable ( actualCallables )
 import CodeGen ( codeGen )
+import LoggingConfig (messageLoggerWithoutSource, myLogger)
 
 -- general imports
 import GHC.Generics
@@ -49,97 +35,25 @@ mkYesod "App" [parseRoutes|
 /healthcheck HealthcheckR GET
 |]
 
-instance Yesod App where maximumContentLength = \app -> (\anyRouteReally -> Just 256000000)
+instance Yesod App where
+    makeLogger = \_app -> myLogger
+    maximumContentLength = \_app -> (\_anyRouteReally -> Just 256000000)
+    messageLoggerSource _app = messageLoggerWithoutSource
 
 getHealthcheckR :: Handler Value
 getHealthcheckR = returnJson $ Healthy True
-
-keepMethod :: Callable -> Maybe MethodContent
-keepMethod (Method m) = Just m
-keepMethod _ = Nothing
-
-keepMethods :: [ Callable ] -> [ MethodContent ]
-keepMethods callables = catMaybes (Data.List.map keepMethod callables)
-
--- Change the type predicate as needed ...
--- This is a temporary filter on the logs
--- Come up with an alternative way soon !
-relevantOrNothing :: Bitcode.Instruction -> Maybe Bitcode.Instruction
-relevantOrNothing instruction@(Bitcode.Instruction _ (Bitcode.Binop  content)) = Just instruction
-relevantOrNothing instruction@(Bitcode.Instruction _ (Bitcode.Call   content)) = Just instruction
-relevantOrNothing instruction@(Bitcode.Instruction _ (Bitcode.Assign content)) = Just instruction
-relevantOrNothing _ = Nothing
-
-extractRelevant :: [ Bitcode.Instruction ] -> [ Bitcode.Instruction ]
-extractRelevant instructions = catMaybes (Data.List.map relevantOrNothing instructions)
-
-getInstructions' :: Cfg -> [ Bitcode.Instruction ]
-getInstructions' cfg = let
-    _nodes = Cfg.actualNodes (Cfg.nodes cfg)
-    in Data.Set.toList (Data.Set.map Cfg.theInstructionInside _nodes)
-
-getInstructions :: [ Cfg ] -> [ Bitcode.Instruction ]
-getInstructions cfgs = Data.List.foldl' (++) [] (Data.List.map getInstructions' cfgs)
-
-focusOnRelevantLocation' :: Bitcode.Instruction -> Bool
-focusOnRelevantLocation' instruction = let
-    l = Bitcode.location instruction
-    lineMatches = ((Location.lineStart l) == 32) && ((Location.lineEnd l) == 32)
-    colsMatch = True -- ((Location.colStart l) == 22) && ((Location.colEnd l) == 27)
-    in lineMatches && colsMatch
-
-focusOnRelevantLocation :: [ Bitcode.Instruction ] -> [ Bitcode.Instruction ]
-focusOnRelevantLocation = Data.List.filter focusOnRelevantLocation'
-
-filterRelavantFrom :: Callables -> [ Bitcode.Instruction ]
-filterRelavantFrom (Callables callables) = let
-    methods = keepMethods callables
-    allInstructions = getInstructions (Data.List.map methodBody methods)
-    relevantInstructions = extractRelevant allInstructions
-    in focusOnRelevantLocation relevantInstructions
 
 postHomeR :: Handler Value
 postHomeR = do
     ast <- requireCheckJsonBody :: Handler Ast.Root
     let result = codeGen ast
-    -- code gen textual output is *huge*
-    -- even powerful editors like vim choke on it
-    -- until I find a better way, I will let the
-    -- server do the log filtering ... 😮
-    let instructions = filterRelavantFrom result
-    $logInfoS "(CodeGen)" (Data.Text.pack (show instructions))
+    let numCallables = Prelude.length (actualCallables result)
+    let receivedFilename = Ast.filename ast
+    let message = "receivedAst=" ++ receivedFilename ++ ", numCallables=" ++ show numCallables
+    $logInfoS "(CodeGen)" (T.pack message)
     returnJson result
-
-myLogger :: IO Logger
-myLogger = do
-    _loggerSet <- newStdoutLoggerSet defaultBufSize
-    _formatter <- newTimeCache "[%d/%m/%Y ( %H:%M:%S )]"
-    return $ Logger _loggerSet _formatter
-
-dateFormatter :: String -> String
-dateFormatter date = let
-    date' = parseTimeOrError True defaultTimeLocale "%d/%b/%Y:%T %Z" date :: UTCTime
-    in formatTime defaultTimeLocale "[%d/%m/%Y ( %H:%M:%S )]" date'
-
-unquote :: String -> String
-unquote s = let n = Prelude.length s in Prelude.take (n-2) (Prelude.drop 1 s)
-
-logify :: String -> Network.Wai.Request -> String
-logify date req = let
-    datePart = dateFormatter date
-    method = unquote (show (Network.Wai.requestMethod req))
-    url = unquote (show (Network.Wai.rawPathInfo req))
-    in datePart ++ " [Info#(Wai)] " ++ method ++ " " ++ url ++ "\n"
-
-formatter :: Network.Wai.Logger.ZonedDate -> Network.Wai.Request -> Network.HTTP.Types.Status.Status -> Maybe Integer -> LogStr
-formatter zonedDate req status responseSize = toLogStr (logify (unquote (show zonedDate)) req)
-
-loggerSettings :: Wai.RequestLoggerSettings
-loggerSettings = Wai.defaultRequestLoggerSettings { Wai.outputFormat = Wai.CustomOutputFormat formatter }
 
 main :: IO ()
 main = do
     waiApp <- toWaiAppPlain App
-    myLoggingMiddleware <- Wai.mkRequestLogger loggerSettings
-    let middleware = myLoggingMiddleware . defaultMiddlewaresNoLogging
-    run 3000 $ middleware waiApp
+    run 3000 $ defaultMiddlewaresNoLogging waiApp
