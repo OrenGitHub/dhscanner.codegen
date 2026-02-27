@@ -6,15 +6,15 @@ module ActualType
 where
 
 -- project imports
-import Fqn
+import qualified Fqn
 
 -- project (qualified) imports
 import Location
+import qualified Ast
 import qualified Token
 
 -- general imports
 import Data.Map ( Map )
-import Data.Set ( Set )
 
 -- general (qualified) imports
 import GHC.Generics
@@ -28,66 +28,33 @@ data ActualType
    | NativeTypeConstStr String
    | NativeTypeConstBool Bool
    | NativeTypeConstNull
-   | Class ClassContent
+   | ClassName ClassNameContent
+   | ClassInstance ClassInstanceContent
    | Lambda LambdaContent
    | Method MethodContent
-   | Package PackageContent
+   | CallMethodOfClass Location String Token.ClassName
    | Function FunctionContent
    | FirstPartyImport FirstPartyImportContent
    | ThirdPartyImport ThirdPartyImportContent
    | FieldedAccess ActualType Token.FieldName
    deriving ( Show, Eq, Ord, Generic )
 
-newtype Classes = Classes { actualClasses :: Map String ClassContent } deriving ( Show )
+newtype Classes = Classes { actualClasses :: Map String ClassNameContent } deriving ( Show )
 
-newtype Functions
-   = Functions
+newtype ClassNameContent
+   = ClassNameContent
      {
-         actualFunctions :: Map String ClassContent
-     }
-     deriving ( Show, Eq, Ord )
-
--- addMethod :: Ast.DecMethodContent -> Ast.DecClassContent -> Classes -> Classes
--- addMethod m c classes = Classes { actualClasses = actualClasses' }
---    where
---        actualClasses' = alter c classes 
-
-newtype Super
-   = Super
-     {
-         actualSuper :: ClassContent
+         className :: Token.ClassName
      }
      deriving ( Show, Eq, Ord, Generic )
 
-newtype Supers
-   = Supers
-     {
-         actualSupers :: Set Super
-     }
-     deriving ( Show, Eq, Ord, Generic )
+data InstanceName = This | Self deriving ( Show, Eq, Ord, Generic )
 
-data DataMember
-   = DataMember
+data ClassInstanceContent
+   = ClassInstanceContent
      {
-         dataMemberName :: Token.MemberName,
-         dataMemberType :: ActualType
-     }
-     deriving ( Show, Eq, Ord, Generic )
-
-newtype DataMembers
-   = DataMembers
-     {
-         actualDataMembers :: Set DataMember
-     }
-     deriving ( Show, Eq, Ord, Generic )
-
-data ClassContent
-   = ClassContent
-     {
-         className :: Token.ClassName,
-         supers :: Supers,
-         methods :: Methods,
-         dataMembers :: DataMembers
+         instanceName :: InstanceName,
+         instanceOfClass :: Token.ClassName
      }
      deriving ( Show, Eq, Ord, Generic )
 
@@ -154,14 +121,17 @@ newtype ThirdPartyImportContent
      }
      deriving ( Show, Eq, Ord, Generic )
 
-data PackageContent
-   = PackageContent
-     {
-     }
-     deriving ( Show, Eq, Ord, Generic )
+inferFromBinop :: ActualType -> ActualType -> Ast.Operator -> ActualType
+inferFromBinop NativeTypeStr NativeTypeStr Ast.PLUS = NativeTypeStr
+inferFromBinop NativeTypeInt NativeTypeInt Ast.PLUS = NativeTypeInt
+inferFromBinop _ _ _ = Any
 
-toFqn :: ActualType -> Fqn
-toFqn (ThirdPartyImport (ThirdPartyImportContent name)) = Fqn name
-toFqn (NativeTypeStr) = Fqn.nativeStr
-toFqn (Class c) = Fqn (Token.content (Token.getClassNameToken (className c)))
-toFqn _ = Fqn.nativeInt
+toFqn :: ActualType -> Fqn.Fqn
+toFqn (ThirdPartyImport (ThirdPartyImportContent name)) = Fqn.Imported (Fqn.ImportedThirdParty (Fqn.ImportedThirdPartyContent name []))
+toFqn NativeTypeStr = Fqn.NativeTypeString
+toFqn (ClassName (ClassNameContent c)) = Fqn.ClassName (Fqn.ClassNameContent c)
+toFqn (FieldedAccess t field) = Fqn.FieldedAccess (toFqn t) field
+toFqn (ClassInstance (ClassInstanceContent This name)) = Fqn.ClassInstance (Fqn.ClassInstanceContent Fqn.This name)
+toFqn (ClassInstance (ClassInstanceContent Self name)) = Fqn.ClassInstance (Fqn.ClassInstanceContent Fqn.Self name)
+toFqn (CallMethodOfClass call method c) = Fqn.CallMethodOfClass call method c
+toFqn _ = Fqn.Unknwon

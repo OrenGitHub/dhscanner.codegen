@@ -3,8 +3,6 @@ module SymbolTable
 where
 
 -- project imports
-import Fqn
-import Location
 import ActualType
 import qualified Token
 import qualified Bitcode
@@ -60,27 +58,8 @@ createOsPython = ActualType.ThirdPartyImport $ ActualType.ThirdPartyImportConten
 createSubprocessPython :: ActualType
 createSubprocessPython = ActualType.ThirdPartyImport $ ActualType.ThirdPartyImportContent "python.subprocess"
 
-runtimeScope :: Scope
-runtimeScope = let
-    pyloc = Location "python" 0 0 0 0 -- for native python functions
-    location' = Location "fstring" 0 0 0 0 -- instrumented format string function
-    varNameFstring          = Token.VarName (Token.Named "fstring" location')
-    varNameOsPython         = Token.VarName (Token.Named "python.os" pyloc)
-    varNameSubprocessPython = Token.VarName (Token.Named "python.subprocess" pyloc)
-    fstringSpecialVar   = Bitcode.SrcVariableCtor $ Bitcode.SrcVariable (Fqn "fstring")           varNameFstring
-    osPythonVar         = Bitcode.SrcVariableCtor $ Bitcode.SrcVariable (Fqn "python.os")         varNameOsPython
-    subprocessPythonVar = Bitcode.SrcVariableCtor $ Bitcode.SrcVariable (Fqn "python.subprocess") varNameSubprocessPython
-    fstringFuncName = Token.FuncName (Token.Named "fstring" location')
-    fstringFunc = createFstringFunc fstringFuncName
-    osPython = createOsPython
-    subprocessPython = createSubprocessPython
-    fstring    = ("fstring",    (fstringSpecialVar,   fstringFunc))
-    os         = ("os",         (osPythonVar,         osPython)) 
-    subprocess = ("subprocess", (subprocessPythonVar, subprocessPython)) 
-    in Scope $ Data.Map.fromList [ fstring, os, subprocess ]
-
 emptySymbolTable :: SymbolTable
-emptySymbolTable = SymbolTable { scopes = [ runtimeScope ] }
+emptySymbolTable = SymbolTable { scopes = [] }
 
 insert' :: String -> Bitcode.Variable -> ActualType -> Scope -> Scope
 insert' content' b t (Scope s) = Scope $ Data.Map.insert content' (b,t) s
