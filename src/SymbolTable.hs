@@ -52,12 +52,6 @@ createFstringFunc f = let
     f' = ActualType.FunctionContent f irrelevantParams strRetType
     in ActualType.Function f'
 
-createOsPython :: ActualType
-createOsPython = ActualType.ThirdPartyImport $ ActualType.ThirdPartyImportContent "python.os"
-
-createSubprocessPython :: ActualType
-createSubprocessPython = ActualType.ThirdPartyImport $ ActualType.ThirdPartyImportContent "python.subprocess"
-
 emptySymbolTable :: SymbolTable
 emptySymbolTable = SymbolTable { scopes = [] }
 
@@ -90,7 +84,7 @@ lookupVar v table = lookup' (Token.content $ Token.getVarNameToken v) (scopes ta
 
 actualTypeOrAny :: Maybe (Bitcode.Variable, ActualType) -> ActualType
 actualTypeOrAny (Just (_, actualType)) = actualType
-actualTypeOrAny Nothing = ActualType.ThirdPartyImport (ActualType.ThirdPartyImportContent "MOSHIK")
+actualTypeOrAny Nothing = ActualType.Any
 
 -- self is an instrumented var, inserted while handling python classes
 -- this call should normally return a Just type, and returning a Nothing
@@ -110,7 +104,7 @@ lookupNominalType :: Token.Named -> SymbolTable -> ActualType
 lookupNominalType t table = let
     name = Token.content t
     in case lookup' name (scopes table) of {
-        Nothing -> ActualType.ThirdPartyImport (ActualType.ThirdPartyImportContent name);
+        Nothing -> ActualType.Any;
         Just (_, actualType) -> actualType
     }
 

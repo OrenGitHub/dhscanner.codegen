@@ -108,16 +108,19 @@ newtype LambdaContent
 data FirstPartyImportContent
    = FirstPartyImportContent
      {
-         firstPartyImportedContent :: FilePath,
-         firstPartyImportedSpecific :: Maybe String
+         firstPartyImportedLocation :: FilePath,
+         firstPartyImportedName :: Maybe String
      }
      deriving ( Show, Eq, Ord, Generic )
 
 
-newtype ThirdPartyImportContent
+data ThirdPartyImportContent
    = ThirdPartyImportContent
      {
-         thirdPartyImportedName :: String
+         thirdPartyImportedPackageName :: String,
+         thirdPartyImportedPartsFromPackage :: [ String ],
+         thirdPartyImportJustOneName :: Maybe String,
+         thirdPartyImportWithAlias :: Maybe String
      }
      deriving ( Show, Eq, Ord, Generic )
 
@@ -127,7 +130,8 @@ inferFromBinop NativeTypeInt NativeTypeInt Ast.PLUS = NativeTypeInt
 inferFromBinop _ _ _ = Any
 
 toFqn :: ActualType -> Fqn.Fqn
-toFqn (ThirdPartyImport (ThirdPartyImportContent name)) = Fqn.Imported (Fqn.ImportedThirdParty (Fqn.ImportedThirdPartyContent name []))
+toFqn (ThirdPartyImport (ThirdPartyImportContent x ys z w)) = Fqn.ThirdPartyImport (Fqn.ThirdPartyImportContent x ys z w)
+toFqn (FirstPartyImport (FirstPartyImportContent f name )) = Fqn.FirstPartyImport (Fqn.FirstPartyImportContent f name)
 toFqn NativeTypeStr = Fqn.NativeTypeString
 toFqn (ClassName (ClassNameContent c)) = Fqn.ClassName (Fqn.ClassNameContent c)
 toFqn (FieldedAccess t field) = Fqn.FieldedAccess (toFqn t) field

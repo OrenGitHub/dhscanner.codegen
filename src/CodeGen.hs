@@ -289,7 +289,7 @@ codeGenStmtImportAll'' :: Ast.ImportThirdPartyContent -> Location -> CodeGenCont
 codeGenStmtImportAll'' (Ast.ImportThirdPartyContent src) l = do
     ctx <- get
     let srcVarName = Token.VarName (Token.Named src l)
-    let actualType = ActualType.ThirdPartyImport (ActualType.ThirdPartyImportContent src)
+    let actualType = ActualType.ThirdPartyImport (ActualType.ThirdPartyImportContent src [] Nothing Nothing)
     let srcVar = Bitcode.SrcVariableCtor (Bitcode.SrcVariable (ActualType.toFqn actualType) srcVarName)
     let symbolTable' = SymbolTable.insertVar srcVarName srcVar actualType (symbolTable ctx)
     put $ ctx { symbolTable = symbolTable' }
@@ -313,7 +313,7 @@ codeGenStmtImportSpecific'' :: Ast.ImportThirdPartyContent -> Ast.ImportSpecific
 codeGenStmtImportSpecific'' (Ast.ImportThirdPartyContent src) (Ast.ImportSpecific specific) l = do
     ctx <- get
     let specificVarName = Token.VarName (Token.Named specific l)
-    let actualType = ActualType.ThirdPartyImport (ActualType.ThirdPartyImportContent (src ++ "." ++ specific))
+    let actualType = ActualType.ThirdPartyImport (ActualType.ThirdPartyImportContent src [] (Just specific) Nothing)
     let specificVar = Bitcode.SrcVariableCtor (Bitcode.SrcVariable (ActualType.toFqn actualType) specificVarName)
     let symbolTable' = SymbolTable.insertVar specificVarName specificVar actualType (symbolTable ctx)
     put $ ctx { symbolTable = symbolTable' }
@@ -337,7 +337,7 @@ codeGenStmtImportSpecificWithAlias'' :: Ast.ImportThirdPartyContent -> Ast.Impor
 codeGenStmtImportSpecificWithAlias'' (Ast.ImportThirdPartyContent src) (Ast.ImportSpecific specific) (Ast.ImportAlias alias) l = do
     ctx <- get
     let aliasVarName = Token.VarName (Token.Named alias l)
-    let actualType = ActualType.ThirdPartyImport (ActualType.ThirdPartyImportContent (src ++ "." ++ specific))
+    let actualType = ActualType.ThirdPartyImport (ActualType.ThirdPartyImportContent src [] (Just specific) (Just alias))
     let aliasVar = Bitcode.SrcVariableCtor (Bitcode.SrcVariable (ActualType.toFqn actualType) aliasVarName)
     let symbolTable' = SymbolTable.insertVar aliasVarName aliasVar actualType (symbolTable ctx)
     put $ ctx { symbolTable = symbolTable' }
@@ -361,7 +361,7 @@ codeGenStmtImportAllWithAlias'' :: Ast.ImportThirdPartyContent -> Ast.ImportAlia
 codeGenStmtImportAllWithAlias'' (Ast.ImportThirdPartyContent src) (Ast.ImportAlias alias) l = do
     ctx <- get
     let aliasVarName = Token.VarName (Token.Named alias l)
-    let actualType = ActualType.ThirdPartyImport (ActualType.ThirdPartyImportContent src)
+    let actualType = ActualType.ThirdPartyImport (ActualType.ThirdPartyImportContent src [] Nothing (Just alias))
     let aliasVar = Bitcode.SrcVariableCtor (Bitcode.SrcVariable (ActualType.toFqn actualType) aliasVarName)
     let symbolTable' = SymbolTable.insertVar aliasVarName aliasVar actualType (symbolTable ctx)
     put $ ctx { symbolTable = symbolTable' }
@@ -519,9 +519,6 @@ codeGenExpBinop expBinop = do
 codeGenExpLambda :: Ast.ExpLambdaContent -> CodeGenContext GeneratedExp
 codeGenExpLambda e = do { insertLambdaCallable e; codeGenExpLambda' e }
 
--- beginScope :: CodeGenContext ()
--- endScope   :: CodeGenContext ()
-
 beginScope = do { ctx <- get; put $ ctx { symbolTable = SymbolTable.beginScope (symbolTable ctx) } }
 endScope   = do { ctx <- get; put $ ctx { symbolTable = SymbolTable.endScope   (symbolTable ctx) } }
 
@@ -624,16 +621,13 @@ nondet :: Token.VarName -> GeneratedExp
 nondet varName = let
     location' = Token.getVarNameLocation varName
     rawName = Token.content (Token.getVarNameToken varName)
-    actualType = ActualType.ThirdPartyImport (ActualType.ThirdPartyImportContent rawName)
+    actualType = ActualType.ThirdPartyImport (ActualType.ThirdPartyImportContent rawName [] Nothing Nothing)
     unresolvedRefInput = Bitcode.SrcVariableCtor $ Bitcode.SrcVariable (ActualType.toFqn actualType) varName
     output = Bitcode.SrcVariableCtor $ Bitcode.SrcVariable (ActualType.toFqn actualType) varName
     unresolvedRef = Bitcode.UnresolvedRef (Bitcode.UnresolvedRefContent output unresolvedRefInput location')
     instruction = Bitcode.Instruction location' unresolvedRef
     cfg = Cfg.Normal (Cfg.atom (Cfg.Node instruction))
     in GeneratedExp cfg (Bitcode.VariableCtor output) actualType
-
-someType :: ActualType
-someType = ActualType.ThirdPartyImport (ActualType.ThirdPartyImportContent "KOKO77777")
 
 -- | for some reason, the variable needed to generate an exp
 -- does not exist in the symbol table. this is (probably? surely?) an error.
@@ -643,11 +637,7 @@ someType = ActualType.ThirdPartyImport (ActualType.ThirdPartyImportContent "KOKO
 -- best thing we can do is use some universal variable to capture all
 -- the missing variables
 codeGenExpVarSimpleMissing :: Token.VarName -> GeneratedExp
-codeGenExpVarSimpleMissing v = let
-    generatedExp = nondet v
-    content' = ActualType.ThirdPartyImportContent (Token.content (Token.getVarNameToken v))
-    actualType = ActualType.ThirdPartyImport content'
-    in generatedExp { inferredActualType = actualType }
+codeGenExpVarSimpleMissing v = let generatedExp = nondet v in generatedExp { inferredActualType = ActualType.Any }
 
 codeGenVarSimple' :: Token.VarName -> SymbolTable -> GeneratedExp
 codeGenVarSimple' v table = case SymbolTable.lookupVar v table of
@@ -714,14 +704,11 @@ codeGenExpVar (Ast.ExpVarContent v) = codeGenVar v
 codeGenExps :: [ Ast.Exp ] -> CodeGenContext [ GeneratedExp ]
 codeGenExps = mapM codeGenExp
 
-thirdPartyContent :: String -> ActualType
-thirdPartyContent = ActualType.ThirdPartyImport . ActualType.ThirdPartyImportContent
-
 -- | normal case currently ignores overloading
 getReturnActualType'' :: Callee -> ActualType
 getReturnActualType'' (GeneratedExp _ _ (ActualType.Function f)) = ActualType.returnType f
 getReturnActualType'' (GeneratedExp _ _ (ActualType.ThirdPartyImport i)) = ActualType.ThirdPartyImport i
-getReturnActualType'' _ = ActualType.ThirdPartyImport (ThirdPartyImportContent "MOMO66")
+getReturnActualType'' _ = ActualType.Any
 
 -- | separate javascript `require` calls
 getReturnActualType :: Callee -> Args -> ActualType
@@ -797,7 +784,7 @@ createBitcodeVarIfNeeded :: Ast.VarSimpleContent -> CodeGenContext ()
 createBitcodeVarIfNeeded v = do { ctx <- get; put $ let
     bitcodeVar = Bitcode.SrcVariableCtor (Bitcode.SrcVariable Fqn.NativeTypeInt (Ast.varName v))
     bitcodeVarExists = SymbolTable.varExists (Ast.varName v) (symbolTable ctx)
-    symbolTable' = SymbolTable.insertVar (Ast.varName v) bitcodeVar someType (symbolTable ctx)
+    symbolTable' = SymbolTable.insertVar (Ast.varName v) bitcodeVar ActualType.Any (symbolTable ctx)
     in case bitcodeVarExists of { True -> ctx; False -> ctx { symbolTable = symbolTable' } }
 }
 
