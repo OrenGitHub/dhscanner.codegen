@@ -75,7 +75,9 @@ codeGen ast = Callables (callables (execState (codeGenRoot ast) initCodeGenState
 
 codeGenRoot :: Ast.Root -> CodeGenContext ()
 codeGenRoot (Ast.Root filename' stmts) = do
+    beginScope
     scriptCfg <- codeGenStmts stmts -- script part
+    endScope
     ctx <- get; -- function + lambda callables
     let callables' = scriptToCallable filename' scriptCfg : callables ctx -- combine
     put $ ctx { callables = callables' } -- write back to state
