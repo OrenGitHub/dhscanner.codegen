@@ -32,7 +32,9 @@ data ActualType
    | ClassInstance ClassInstanceContent
    | Lambda LambdaContent
    | Method MethodContent
+   | UntypedNamedParam Token.ParamName
    | CallMethodOfClass Location String Token.ClassName
+   | CallMethodOfUntypedNamedParam Location String Token.ParamName
    | Function FunctionContent
    | FirstPartyImport FirstPartyImportContent
    | ThirdPartyImport ThirdPartyImportContent
@@ -138,4 +140,5 @@ toFqn (FieldedAccess t field) = Fqn.FieldedAccess (toFqn t) field
 toFqn (ClassInstance (ClassInstanceContent This name)) = Fqn.ClassInstance (Fqn.ClassInstanceContent Fqn.This name)
 toFqn (ClassInstance (ClassInstanceContent Self name)) = Fqn.ClassInstance (Fqn.ClassInstanceContent Fqn.Self name)
 toFqn (CallMethodOfClass call method c) = Fqn.CallMethodOfClass call method c
-toFqn _ = Fqn.Unknwon
+toFqn (CallMethodOfUntypedNamedParam call method p) = Fqn.CallMethodOfUntypedNamedParam call method p
+toFqn _ = Fqn.Unknown

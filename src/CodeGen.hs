@@ -589,8 +589,9 @@ codeGenParamSelf i p = do
 
 codeGenParamNonSelf :: Word -> Ast.Param -> CodeGenContext Cfg
 codeGenParamNonSelf i p = do
-    insertParamWithActualTypeToSymbolTable (Ast.paramName p) ActualType.Any i
-    return $ mkParamDeclCfg i p (ActualType.toFqn ActualType.Any) (Ast.paramName p)
+    let actualType = ActualType.UntypedNamedParam (Ast.paramName p)
+    insertParamWithActualTypeToSymbolTable (Ast.paramName p) actualType i
+    return $ mkParamDeclCfg i p (ActualType.toFqn actualType) (Ast.paramName p)
 
 codeGenParam''' :: Bool -> Word -> Ast.Param -> CodeGenContext Cfg
 codeGenParam''' True = codeGenParamSelf
@@ -748,8 +749,32 @@ codeGenExpCall''' (Bitcode.TmpVariableCtor   v) = codeGenExpCallMethod1 v
 codeGenExpCall''' (Bitcode.SrcVariableCtor   v) = codeGenExpCallMethod2 v
 codeGenExpCall''' (Bitcode.ParamVariableCtor v) = codeGenExpCallMethod3 v
 
+codeGenExpCall'''' :: Bitcode.Variable -> Cfg -> Token.ParamName -> Token.FieldName -> [ GeneratedExp ] -> Location -> GeneratedExp
+codeGenExpCall'''' (Bitcode.TmpVariableCtor   v) = codeGenExpCallMethod1' v
+codeGenExpCall'''' (Bitcode.SrcVariableCtor   v) = codeGenExpCallMethod2' v
+codeGenExpCall'''' (Bitcode.ParamVariableCtor v) = codeGenExpCallMethod3' v
+
+codeGenExpCallMethod1' :: Bitcode.TmpVariable -> Cfg -> Token.ParamName -> Token.FieldName -> [ GeneratedExp ] -> Location -> GeneratedExp
+codeGenExpCallMethod1' v cfg p (Token.FieldName (Token.Named method _)) args loc = let
+    actualType = ActualType.CallMethodOfUntypedNamedParam loc method p
+    modifiedFqn = ActualType.toFqn actualType
+    in codeGenExpCallMethod (Bitcode.TmpVariableCtor (v { Bitcode.tmpVariableFqn = modifiedFqn })) cfg args loc actualType
+
+codeGenExpCallMethod2' :: Bitcode.SrcVariable -> Cfg -> Token.ParamName -> Token.FieldName -> [ GeneratedExp ] -> Location -> GeneratedExp
+codeGenExpCallMethod2' v cfg p (Token.FieldName (Token.Named method _)) args loc = let
+    actualType = ActualType.CallMethodOfUntypedNamedParam loc method p
+    modifiedFqn = ActualType.toFqn actualType
+    in codeGenExpCallMethod (Bitcode.SrcVariableCtor (v { Bitcode.srcVariableFqn = modifiedFqn })) cfg args loc actualType
+
+codeGenExpCallMethod3' :: Bitcode.ParamVariable -> Cfg -> Token.ParamName -> Token.FieldName -> [ GeneratedExp ] -> Location -> GeneratedExp
+codeGenExpCallMethod3' v cfg p (Token.FieldName (Token.Named method _)) args loc = let
+    actualType = ActualType.CallMethodOfUntypedNamedParam loc method p
+    modifiedFqn = ActualType.toFqn actualType
+    in codeGenExpCallMethod (Bitcode.ParamVariableCtor (v { Bitcode.paramVariableFqn = modifiedFqn })) cfg args loc actualType
+
 codeGenExpCall'' :: Bitcode.Variable -> Cfg -> ActualType -> [ GeneratedExp ] -> Location -> GeneratedExp
 codeGenExpCall'' v cfg (ActualType.FieldedAccess (ActualType.ClassInstance c) f) args loc = codeGenExpCall''' v cfg c f args loc
+codeGenExpCall'' v cfg (ActualType.FieldedAccess (ActualType.UntypedNamedParam p) f) args loc = codeGenExpCall'''' v cfg p f args loc
 codeGenExpCall'' v cfg calleeActualType args loc = let
     actualType = getReturnActualType' calleeActualType
     output = Bitcode.TmpVariableCtor (Bitcode.TmpVariable (ActualType.toFqn actualType) loc)
