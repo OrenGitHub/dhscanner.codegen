@@ -141,4 +141,4 @@ toFqn (ClassInstance (ClassInstanceContent This name)) = Fqn.ClassInstance (Fqn.
 toFqn (ClassInstance (ClassInstanceContent Self name)) = Fqn.ClassInstance (Fqn.ClassInstanceContent Fqn.Self name)
 toFqn (CallMethodOfClass call method c) = Fqn.CallMethodOfClass call method c
 toFqn (CallMethodOfUntypedNamedParam call method p) = Fqn.CallMethodOfUntypedNamedParam call method p
-toFqn _ = Fqn.Unknown
+toFqn _ = Fqn.Unknwon
