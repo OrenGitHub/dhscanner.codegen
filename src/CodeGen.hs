@@ -277,8 +277,8 @@ codeGenStmtFunc stmtFunc = do
     put (ctx { symbolTable = symbolTable', callables = callables' })
     return Cfg.Empty
 
-codeGenStmtImportAll' :: Ast.ImportLocalContent -> Location -> CodeGenContext Cfg
-codeGenStmtImportAll' (Ast.ImportLocalContent src) l = do
+codeGenStmtImportAllFromLocalFile :: FilePath -> Location -> CodeGenContext Cfg
+codeGenStmtImportAllFromLocalFile src l = do
     ctx <- get
     let srcVarName = Token.VarName (Token.Named (takeFileName src) l)
     let actualType = ActualType.FirstPartyImport (ActualType.FirstPartyImportContent src Nothing)
@@ -286,6 +286,20 @@ codeGenStmtImportAll' (Ast.ImportLocalContent src) l = do
     let symbolTable' = SymbolTable.insertVar srcVarName srcVar actualType (symbolTable ctx)
     put $ ctx { symbolTable = symbolTable' }
     return Cfg.Empty
+
+codeGenStmtImportAllFromLocalDir :: FilePath -> Location -> CodeGenContext Cfg
+codeGenStmtImportAllFromLocalDir src l = do
+    ctx <- get
+    let srcVarName = Token.VarName (Token.Named (takeFileName src) l)
+    let actualType = ActualType.FirstPartyImport (ActualType.FirstPartyImportContent src Nothing)
+    let srcVar = Bitcode.SrcVariableCtor (Bitcode.SrcVariable (ActualType.toFqn actualType) srcVarName)
+    let symbolTable' = SymbolTable.insertVar srcVarName srcVar actualType (symbolTable ctx)
+    put $ ctx { symbolTable = symbolTable' }
+    return Cfg.Empty
+
+codeGenStmtImportAll' :: Ast.ImportLocalContent -> Location -> CodeGenContext Cfg
+codeGenStmtImportAll' (Ast.ImportLocalFile src) = codeGenStmtImportAllFromLocalFile src
+codeGenStmtImportAll' (Ast.ImportLocalDir src) = codeGenStmtImportAllFromLocalDir src
 
 codeGenStmtImportAll'' :: Ast.ImportThirdPartyContent -> Location -> CodeGenContext Cfg
 codeGenStmtImportAll'' (Ast.ImportThirdPartyContent src) l = do
@@ -301,8 +315,8 @@ codeGenStmtImportAll :: Ast.ImportSource -> Location -> CodeGenContext Cfg
 codeGenStmtImportAll (Ast.ImportLocal src) = codeGenStmtImportAll' src
 codeGenStmtImportAll (Ast.ImportThirdParty src) = codeGenStmtImportAll'' src
 
-codeGenStmtImportSpecific' :: Ast.ImportLocalContent -> Ast.ImportSpecific -> Location -> CodeGenContext Cfg
-codeGenStmtImportSpecific' (Ast.ImportLocalContent src) (Ast.ImportSpecific specific) l = do
+codeGenStmtImportSpecificFromLocalFile :: FilePath -> Ast.ImportSpecific -> Location -> CodeGenContext Cfg
+codeGenStmtImportSpecificFromLocalFile src (Ast.ImportSpecific specific) l = do
     ctx <- get
     let specificVarName = Token.VarName (Token.Named specific l)
     let actualType = ActualType.FirstPartyImport (ActualType.FirstPartyImportContent src (Just specific))
@@ -310,6 +324,20 @@ codeGenStmtImportSpecific' (Ast.ImportLocalContent src) (Ast.ImportSpecific spec
     let symbolTable' = SymbolTable.insertVar specificVarName specificVar actualType (symbolTable ctx)
     put $ ctx { symbolTable = symbolTable' }
     return Cfg.Empty
+
+codeGenStmtImportSpecificFromLocalDir :: FilePath -> Ast.ImportSpecific -> Location -> CodeGenContext Cfg
+codeGenStmtImportSpecificFromLocalDir src (Ast.ImportSpecific specific) l = do
+    ctx <- get
+    let specificVarName = Token.VarName (Token.Named specific l)
+    let actualType = ActualType.FirstPartyImport (ActualType.FirstPartyImportContent src (Just specific))
+    let specificVar = Bitcode.SrcVariableCtor (Bitcode.SrcVariable (ActualType.toFqn actualType) specificVarName)
+    let symbolTable' = SymbolTable.insertVar specificVarName specificVar actualType (symbolTable ctx)
+    put $ ctx { symbolTable = symbolTable' }
+    return Cfg.Empty
+
+codeGenStmtImportSpecific' :: Ast.ImportLocalContent -> Ast.ImportSpecific -> Location -> CodeGenContext Cfg
+codeGenStmtImportSpecific' (Ast.ImportLocalFile src) = codeGenStmtImportSpecificFromLocalFile src
+codeGenStmtImportSpecific' (Ast.ImportLocalDir src) = codeGenStmtImportSpecificFromLocalDir src
 
 codeGenStmtImportSpecific'' :: Ast.ImportThirdPartyContent -> Ast.ImportSpecific -> Location -> CodeGenContext Cfg
 codeGenStmtImportSpecific'' (Ast.ImportThirdPartyContent src) (Ast.ImportSpecific specific) l = do
@@ -325,8 +353,8 @@ codeGenStmtImportSpecific :: Ast.ImportSource -> Ast.ImportSpecific -> Location 
 codeGenStmtImportSpecific (Ast.ImportLocal src) = codeGenStmtImportSpecific' src
 codeGenStmtImportSpecific (Ast.ImportThirdParty src) = codeGenStmtImportSpecific'' src
 
-codeGenStmtImportSpecificWithAlias' :: Ast.ImportLocalContent -> Ast.ImportSpecific -> Ast.ImportAlias -> Location -> CodeGenContext Cfg
-codeGenStmtImportSpecificWithAlias' (Ast.ImportLocalContent src) (Ast.ImportSpecific specific) (Ast.ImportAlias alias) l = do
+codeGenStmtImportSpecificWithAliasFromFile :: FilePath -> Ast.ImportSpecific -> Ast.ImportAlias -> Location -> CodeGenContext Cfg
+codeGenStmtImportSpecificWithAliasFromFile src (Ast.ImportSpecific specific) (Ast.ImportAlias alias) l = do
     ctx <- get
     let aliasVarName = Token.VarName (Token.Named alias l)
     let actualType = ActualType.FirstPartyImport (ActualType.FirstPartyImportContent src (Just specific))
@@ -334,6 +362,20 @@ codeGenStmtImportSpecificWithAlias' (Ast.ImportLocalContent src) (Ast.ImportSpec
     let symbolTable' = SymbolTable.insertVar aliasVarName aliasVar actualType (symbolTable ctx)
     put $ ctx { symbolTable = symbolTable' }
     return Cfg.Empty
+
+codeGenStmtImportSpecificWithAliasFromDir :: FilePath -> Ast.ImportSpecific -> Ast.ImportAlias -> Location -> CodeGenContext Cfg
+codeGenStmtImportSpecificWithAliasFromDir src (Ast.ImportSpecific specific) (Ast.ImportAlias alias) l = do
+    ctx <- get
+    let aliasVarName = Token.VarName (Token.Named alias l)
+    let actualType = ActualType.FirstPartyImport (ActualType.FirstPartyImportContent src (Just specific))
+    let aliasVar = Bitcode.SrcVariableCtor (Bitcode.SrcVariable (ActualType.toFqn actualType) aliasVarName)
+    let symbolTable' = SymbolTable.insertVar aliasVarName aliasVar actualType (symbolTable ctx)
+    put $ ctx { symbolTable = symbolTable' }
+    return Cfg.Empty
+
+codeGenStmtImportSpecificWithAlias' :: Ast.ImportLocalContent -> Ast.ImportSpecific -> Ast.ImportAlias -> Location -> CodeGenContext Cfg
+codeGenStmtImportSpecificWithAlias' (Ast.ImportLocalFile src) = codeGenStmtImportSpecificWithAliasFromFile src
+codeGenStmtImportSpecificWithAlias' (Ast.ImportLocalDir src) = codeGenStmtImportSpecificWithAliasFromDir src
 
 codeGenStmtImportSpecificWithAlias'' :: Ast.ImportThirdPartyContent -> Ast.ImportSpecific -> Ast.ImportAlias -> Location -> CodeGenContext Cfg
 codeGenStmtImportSpecificWithAlias'' (Ast.ImportThirdPartyContent src) (Ast.ImportSpecific specific) (Ast.ImportAlias alias) l = do
@@ -349,8 +391,8 @@ codeGenStmtImportSpecificWithAlias :: Ast.ImportSource -> Ast.ImportSpecific -> 
 codeGenStmtImportSpecificWithAlias (Ast.ImportLocal src) = codeGenStmtImportSpecificWithAlias' src
 codeGenStmtImportSpecificWithAlias (Ast.ImportThirdParty src) = codeGenStmtImportSpecificWithAlias'' src
 
-codeGenStmtImportAllWithAlias' :: Ast.ImportLocalContent -> Ast.ImportAlias -> Location -> CodeGenContext Cfg
-codeGenStmtImportAllWithAlias' (Ast.ImportLocalContent src) (Ast.ImportAlias alias) l = do
+codeGenStmtImportAllWithAliasFromLocalFile :: FilePath -> Ast.ImportAlias -> Location -> CodeGenContext Cfg
+codeGenStmtImportAllWithAliasFromLocalFile src (Ast.ImportAlias alias) l = do
     ctx <- get
     let aliasVarName = Token.VarName (Token.Named alias l)
     let actualType = ActualType.FirstPartyImport (ActualType.FirstPartyImportContent src Nothing)
@@ -358,6 +400,20 @@ codeGenStmtImportAllWithAlias' (Ast.ImportLocalContent src) (Ast.ImportAlias ali
     let symbolTable' = SymbolTable.insertVar aliasVarName aliasVar actualType (symbolTable ctx)
     put $ ctx { symbolTable = symbolTable' }
     return Cfg.Empty
+
+codeGenStmtImportAllWithAliasFromLocalDir :: FilePath -> Ast.ImportAlias -> Location -> CodeGenContext Cfg
+codeGenStmtImportAllWithAliasFromLocalDir src (Ast.ImportAlias alias) l = do
+    ctx <- get
+    let aliasVarName = Token.VarName (Token.Named alias l)
+    let actualType = ActualType.FirstPartyImport (ActualType.FirstPartyImportContent src Nothing)
+    let aliasVar = Bitcode.SrcVariableCtor (Bitcode.SrcVariable (ActualType.toFqn actualType) aliasVarName)
+    let symbolTable' = SymbolTable.insertVar aliasVarName aliasVar actualType (symbolTable ctx)
+    put $ ctx { symbolTable = symbolTable' }
+    return Cfg.Empty
+
+codeGenStmtImportAllWithAlias' :: Ast.ImportLocalContent -> Ast.ImportAlias -> Location -> CodeGenContext Cfg
+codeGenStmtImportAllWithAlias' (Ast.ImportLocalFile src) = codeGenStmtImportAllWithAliasFromLocalFile src
+codeGenStmtImportAllWithAlias' (Ast.ImportLocalDir src) = codeGenStmtImportAllWithAliasFromLocalDir src
 
 codeGenStmtImportAllWithAlias'' :: Ast.ImportThirdPartyContent -> Ast.ImportAlias -> Location -> CodeGenContext Cfg
 codeGenStmtImportAllWithAlias'' (Ast.ImportThirdPartyContent src) (Ast.ImportAlias alias) l = do
