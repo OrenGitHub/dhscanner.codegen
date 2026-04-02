@@ -35,8 +35,11 @@ data ActualType
    | UntypedNamedParam Token.ParamName
    | CallMethodOfClass Location String Token.ClassName
    | CallMethodOfUntypedNamedParam Location String Token.ParamName
+   | CallFuncFromImportedDir Location String FilePath
+   | CallFuncFromImportedFile Location String FilePath
    | Function FunctionContent
    | FirstPartyImport FirstPartyImportContent
+   | FirstPartyDirImport FirstPartyDirImportContent
    | ThirdPartyImport ThirdPartyImportContent
    | FieldedAccess ActualType Token.FieldName
    deriving ( Show, Eq, Ord, Generic )
@@ -115,6 +118,13 @@ data FirstPartyImportContent
      }
      deriving ( Show, Eq, Ord, Generic )
 
+data FirstPartyDirImportContent
+   = FirstPartyDirImportContent
+     {
+         firstPartyDirImportLocation :: FilePath,
+         firstPartyDirImportAlias :: Maybe String
+     }
+     deriving ( Show, Eq, Ord, Generic )
 
 data ThirdPartyImportContent
    = ThirdPartyImportContent
@@ -134,6 +144,7 @@ inferFromBinop _ _ _ = Any
 toFqn :: ActualType -> Fqn.Fqn
 toFqn (ThirdPartyImport (ThirdPartyImportContent x ys z w)) = Fqn.ThirdPartyImport (Fqn.ThirdPartyImportContent x ys z w)
 toFqn (FirstPartyImport (FirstPartyImportContent f name )) = Fqn.FirstPartyImport (Fqn.FirstPartyImportContent f name)
+toFqn (FirstPartyDirImport (FirstPartyDirImportContent d a )) = Fqn.FirstPartyDirImport (Fqn.FirstPartyDirImportContent d a)
 toFqn NativeTypeStr = Fqn.NativeTypeString
 toFqn (ClassName (ClassNameContent c)) = Fqn.ClassName (Fqn.ClassNameContent c)
 toFqn (FieldedAccess t field) = Fqn.FieldedAccess (toFqn t) field
@@ -141,4 +152,6 @@ toFqn (ClassInstance (ClassInstanceContent This name)) = Fqn.ClassInstance (Fqn.
 toFqn (ClassInstance (ClassInstanceContent Self name)) = Fqn.ClassInstance (Fqn.ClassInstanceContent Fqn.Self name)
 toFqn (CallMethodOfClass call method c) = Fqn.CallMethodOfClass call method c
 toFqn (CallMethodOfUntypedNamedParam call method p) = Fqn.CallMethodOfUntypedNamedParam call method p
-toFqn _ = Fqn.Unknwon
+toFqn (CallFuncFromImportedDir call func d) = Fqn.CallFuncFromImportedDir call func d
+toFqn (CallFuncFromImportedFile call func f) = Fqn.CallFuncFromImportedDir call func f
+toFqn _ = Fqn.Unknown
