@@ -153,5 +153,5 @@ toFqn (ClassInstance (ClassInstanceContent Self name)) = Fqn.ClassInstance (Fqn.
 toFqn (CallMethodOfClass call method c) = Fqn.CallMethodOfClass call method c
 toFqn (CallMethodOfUntypedNamedParam call method p) = Fqn.CallMethodOfUntypedNamedParam call method p
 toFqn (CallFuncFromImportedDir call func d) = Fqn.CallFuncFromImportedDir call func d
-toFqn (CallFuncFromImportedFile call func f) = Fqn.CallFuncFromImportedDir call func f
+toFqn (CallFuncFromImportedFile call func f) = Fqn.CallFuncFromImportedFile call func f
 toFqn _ = Fqn.Unknown

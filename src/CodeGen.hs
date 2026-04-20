@@ -867,8 +867,30 @@ codeGenExpCallFielded (ActualType.UntypedNamedParam p) f v = codeGenExpCallUntyp
 codeGenExpCallFielded (ActualType.FirstPartyDirImport d) f v = codeGenExpCallFirstPartyDirImportFielded v f d
 codeGenExpCallFielded t f v = codeGenExpCallDefault (ActualType.FieldedAccess t f) v
 
+setNewFqnToTmpVariable :: Bitcode.TmpVariable -> Fqn -> Bitcode.Variable
+setNewFqnToTmpVariable v newFqn = Bitcode.TmpVariableCtor (v { Bitcode.tmpVariableFqn = newFqn })
+
+setNewFqnToSrcVariable :: Bitcode.SrcVariable -> Fqn -> Bitcode.Variable
+setNewFqnToSrcVariable v newFqn = Bitcode.SrcVariableCtor (v { Bitcode.srcVariableFqn = newFqn })
+
+setNewFqnToParamVariable :: Bitcode.ParamVariable -> Fqn -> Bitcode.Variable
+setNewFqnToParamVariable v newFqn = Bitcode.ParamVariableCtor (v { Bitcode.paramVariableFqn = newFqn })
+
+setNewFqnToVariable :: Bitcode.Variable -> Fqn -> Bitcode.Variable
+setNewFqnToVariable (Bitcode.TmpVariableCtor   v) = setNewFqnToTmpVariable   v
+setNewFqnToVariable (Bitcode.SrcVariableCtor   v) = setNewFqnToSrcVariable   v
+setNewFqnToVariable (Bitcode.ParamVariableCtor v) = setNewFqnToParamVariable v
+
+codeGenExpCall1stPartyFunc :: FilePath -> String -> Bitcode.Variable -> Cfg -> [ GeneratedExp ] -> Location -> GeneratedExp
+codeGenExpCall1stPartyFunc f func v cfg args loc = let
+    actualType = ActualType.CallFuncFromImportedFile loc func f
+    newFqn = ActualType.toFqn actualType
+    v' = setNewFqnToVariable v newFqn
+    in codeGenExpCallDefault actualType v' cfg args loc
+
 codeGenExpCall'' :: ActualType -> Bitcode.Variable -> Cfg -> [ GeneratedExp ] -> Location -> GeneratedExp
 codeGenExpCall'' (ActualType.FieldedAccess t f) = codeGenExpCallFielded t f
+codeGenExpCall'' (ActualType.FirstPartyImport (ActualType.FirstPartyImportContent f (Just i))) = codeGenExpCall1stPartyFunc f i
 codeGenExpCall'' calleeActualType = codeGenExpCallDefault calleeActualType
 
 codeGenExpCall' :: Bitcode.Value -> Cfg -> ActualType -> [ GeneratedExp ] -> Location -> GeneratedExp
