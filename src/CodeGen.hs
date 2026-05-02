@@ -170,6 +170,7 @@ codeGenStmts' = mapM codeGenStmt
 -- see `codeGenStmt<TheStatementKindYouWantToInspect>`
 codeGenStmt :: Ast.Stmt -> CodeGenContext Cfg
 codeGenStmt (Ast.StmtIf     stmtIf    ) = codeGenStmtIf stmtIf
+codeGenStmt (Ast.StmtTry    stmtTry   ) = codeGenStmtTry stmtTry
 codeGenStmt (Ast.StmtExp    stmtExp   ) = codeGenStmtExp stmtExp
 codeGenStmt (Ast.StmtFunc   stmtFunc  ) = codeGenStmtFunc stmtFunc
 codeGenStmt (Ast.StmtClass  stmtClass ) = codeGenStmtClass stmtClass
@@ -181,6 +182,9 @@ codeGenStmt (Ast.StmtImport stmtImport) = codeGenStmtImport stmtImport
 codeGenStmt (Ast.StmtReturn stmtReturn) = codeGenStmtReturn stmtReturn
 codeGenStmt (Ast.StmtMethod stmtMethod) = codeGenStmtMethodSingle stmtMethod
 codeGenStmt _                           = return Cfg.Empty
+
+codeGenStmtTry :: Ast.StmtTryContent -> CodeGenContext Cfg
+codeGenStmtTry = codeGenStmts . Ast.stmtTryPart
 
 codeGenStmtExp :: Ast.Exp -> CodeGenContext Cfg
 codeGenStmtExp = fmap generatedCfg . codeGenExp
